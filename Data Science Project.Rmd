@@ -1,0 +1,114 @@
+---
+title: "Data Science Project"
+author: "Chase Clayton"
+date: "2025-01-22"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Testing Data
+
+```{r, warning=FALSE}
+library(readxl)
+library(dplyr)
+library(writexl)
+library(readxl)
+player_Data <- read_excel("C:/Users/2chas/Downloads/Data Science Project/Player Data 2.xlsx")
+totalSalaryData <- player_Data$Value
+totalAverageSalaryData <- player_Data$Average
+totalGuaranteeData <- player_Data$Gaurantee
+
+position <- player_Data$position
+Average <- mean(totalSalaryData)
+
+##comma conversion if needed
+##player_Data[9:10, ] <- lapply(player_Data[9:10, ], function(x){
+    ##if(is.numeric(x)){
+      ##format(x, big.mark = ",")
+    ##}else{
+     ## x
+    ##}
+  ##})
+##write_xlsx(data = player_Data, "formattedPlayerData.xlsx")
+library(readxl)
+library(readxl)
+library(readxl)
+Passing_Data <- read_excel("C:/Users/2chas/Downloads/Data Science Project/Passing Data.xlsx")
+head(Passing_Data)
+
+```
+
+```{r}
+library(randomForest)
+str(Passing_Data)
+sum(!complete.cases(Passing_Data))
+Passing_Data$Salary[is.na(Passing_Data$Salary)] <- median(Passing_Data$Salary, na.rm = TRUE)
+str(Passing_Data)
+```
+
+
+```{r}
+median(Passing_Data$Salary, na.rm = TRUE)
+sum(is.na(Passing_Data$Salary)) 
+table(Passing_Data$Salary)
+Passing_Data$Salary[Passing_Data$Salary == ""] <- NA
+Passing_Data$Salary[Passing_Data$Salary == "NA"] <- NA
+sum(is.na(Passing_Data$Salary)) 
+str(Passing_Data$Salary)
+any(is.infinite(Passing_Data$Salary))
+library(readxl)
+player_Data <- read_excel("C:/Users/2chas/Downloads/NFL Salary Data.xlsx")
+Passing_Data <- read_excel("C:/Users/2chas/Downloads/Data Science Project/Passing Data.xlsx")
+head(Passing_Data)
+sum(!complete.cases(Passing_Data))
+Passing_Data$Salary[is.na(Passing_Data$Salary)] <- median(Passing_Data$Salary, na.rm = TRUE)
+
+
+
+library(dplyr)
+df2Select <- player_Data %>% select(Player, Salary)
+dataMerge <- Passing_Data %>%
+  left_join(df2Select, by = "Player")
+
+
+
+dataMerge$Salary.y[is.na(dataMerge$Salary.y)] <- median(dataMerge$Salary.y, na.rm = TRUE)
+sum(is.na(Passing_Data$Salary)) 
+dataMerge <- dataMerge[, !(names(dataMerge) %in% c("Year"))]
+str(dataMerge)
+dataMergeClean <- na.omit(dataMerge)
+
+colnames(Passing_Data)
+colnames(dataMergeClean) <- gsub("%", "Perc", colnames(dataMergeClean))
+colnames(dataMergeClean) <- gsub("1", "one", colnames(dataMergeClean))
+colnames(dataMergeClean) <- gsub("/", "per", colnames(dataMergeClean))
+colnames(dataMergeClean) <- gsub("4", "four", colnames(dataMergeClean))
+
+```
+```{r}
+
+set.seed(12345)
+model <- randomForest(
+  formula = Salary.y ~ Att + Yds + TD + Int + Age,
+  data = dataMergeClean
+)
+model
+
+which.min(model$mse)
+
+sqrt(model$mse[which.min(model$mse)])
+
+varImpPlot(model)
+
+model_tuned <- tuneRF(
+  x = dataMergeClean[,-1]
+  
+)
+```
+
+
+
+
