@@ -1,0 +1,281 @@
+---
+title: "QB Salary Prediction"
+output: html_document
+date: "2025-03-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Packages and Data Import
+```{r}
+# Packages, install if necessary
+library(dplyr)
+library(randomForest)
+library(ggplot2)
+library(ggrepel)
+library(gridExtra)
+
+# Straight from github repo, assumes all files in same directory
+Salary_Data <- read.csv("./NFL Salary Data.csv")
+Passing_Data <- read.csv("./Passing Data.csv")
+Rushing_Data <- read.csv("./Rushing Data.csv")
+```
+
+Formatting Data
+```{r}
+# Format Player_Data
+# Remove space in team name and format dollar amounts into integers
+Salary_Data <- Salary_Data %>% 
+  mutate(Team.Currently.With = gsub("\\n.+", "", Team.Currently.With)) %>%
+  mutate(
+    Value = as.numeric(gsub("[$,]", "", Value)),
+    Average.Salary = as.numeric(gsub("[$,]", "", Average.Salary)),
+    Practical.Guarantee = as.numeric(gsub("[$,]", "", Practical.Guarantee)),
+    Guarantee.at.Sign = as.numeric(gsub("[$,]", "", Guarantee.at.Sign))
+  )
+
+QB_Salary <- Salary_Data %>%
+  filter(Pos == "QB") %>% 
+  select(Player, Average.Salary, Age.At.Signing, Start.Year) # Change Average.Salary if we want to use total contract or years
+
+QB_Rushing_Data <- Rushing_Data %>% 
+  filter(Pos == "QB") %>%
+  select(Player, Year, Att, Yds, TD, Y.G)
+
+QB_Data <- Passing_Data %>%
+  left_join(QB_Rushing_Data, by= c("Player","Year"), suffix = c("_pass", "_rush")) %>% # Add in rushing data
+  left_join(QB_Salary, by = "Player") %>% # Add in Salary Data
+  filter(!is.na(Average.Salary)) %>% filter(!is.na(QBR)) %>% # Remove NAs
+  filter(Att_pass > 200) # We need to include this to ensure no 3-throw champions are in the mix
+  
+nrow(QB_Data)
+```
+
+# Exploratory Data Analysis
+
+Outlier Bounds via Quantiles
+```{r warning=F} 
+# Outlier testing
+pd2024 <- QB_Data
+
+quantilePlot <- function(df, col, title = col) {
+  Q1 <- quantile(df[[col]], .25)
+  Median <- quantile(df[[col]], .5)
+  Q3 <- quantile(df[[col]], .75)
+  IQR <- Q3 - Q1
+  lower <- Q1 - 1.5 * IQR
+  upper <- Q3 + 1.5 * IQR
+  
+  return(
+    ggplot(df, aes(x = 0, y=.data[[col]])) +
+    geom_boxplot() +
+    geom_label(data = df, aes(y = Q1, label = paste("Q1:", round(Q1, 2)))) +
+    geom_label(data = df, aes(y = Median, label = paste("Median:", round(Median, 2)))) +
+    geom_label(data = df, aes(y = Q3, label = paste("Q3:", round(Q3, 2)))) +
+    geom_text_repel(aes(label = 
+      ifelse(
+        .data[[col]] < lower | .data[[col]] > upper,
+        paste(gsub(".+ ", "", Player), Year), ""
+      )
+    )) +
+    labs(x = "", y = "", title = title)
+  )
+}
+
+grid.arrange(
+  quantilePlot(pd2024, "QBR"),
+  quantilePlot(pd2024, "Rate", "Passer Rating"),
+  quantilePlot(pd2024, "Y.G_pass", "Passing Yards per Game"),
+  quantilePlot(pd2024, "TD_pass", "Touchdown Passes"),
+  nrow=2, ncol=2, top = "Performance metric Quantiles:"
+)
+```
+
+Outlier Visualization based on Bounds
+```{r, warning=F}
+# Contract v Age test
+ggplot(QB_Salary, aes(Age.At.Signing, Average.Salary)) + geom_point() +
+  # geom_text_repel(aes(label = Player)) +  # idt we neeeed names here
+  theme(legend.position = "none") +
+  labs(
+    title = "How Age affects Contract Value",
+    y="Yearly Salary signed for",
+    x = "Age at Contract Signing"
+  )
+
+# QBR Outlier Test
+ggplot(pd2024, aes(QBR, Average.Salary, color=Player)) + geom_point() +
+  geom_text_repel(aes(label = 
+    ifelse(
+      (QBR > quantile(QBR, .75) & Average.Salary < 2e+07) | (QBR < quantile(QBR, .25) & Average.Salary > 2e+07),  
+      paste(gsub("[^A-Z]+", ".", Player), sub("20", "", paste(Year))),
+      ""
+    ) 
+  )) +
+  labs(
+    title = "QBR vs Average Salary, Overperformers and Underperformers labeled",
+    y = "Average Salary"
+  ) + 
+  theme(legend.position = "none")
+
+# Passer Rating outlier test
+ggplot(pd2024, aes(Rate, Average.Salary, color=Player)) + geom_point() +
+  geom_text_repel(aes(label = 
+    ifelse(
+      (Rate > quantile(Rate, .75) & Average.Salary < 2e+07) | (Rate < quantile(Rate, .25) & Average.Salary > 2e+07),  
+      paste(gsub("[^A-Z]+", ".", Player), sub("20", "", paste(Year))),
+      ""
+    ) 
+  )) +
+  labs(
+    title = "Passer Rating vs Average Salary, Overperformers and Underperformers labeled",
+    y = "Average Salary",
+    x = "Passer Rating"
+  ) + 
+  theme(legend.position = "none")
+
+# Y.G Outlier test
+ggplot(pd2024, aes(Y.G_pass, Average.Salary, color=Player)) + geom_point() +
+  geom_text_repel(aes(label = 
+    ifelse(
+      (Y.G_pass > quantile(Y.G_pass, .75) & Average.Salary < 2e+07) | (Y.G_pass < quantile(Y.G_pass, .25) & Average.Salary > 2e+07),  
+      paste(gsub("[^A-Z]+", ".", Player), sub("20", "", paste(Year))),
+      ""
+    ) 
+  )) +
+  labs(
+    title = "Yards/Game v Average Salary, Overperformers and Underperformers labeled",
+    y = "Average Salary",
+    x = "Yards/Game"
+  ) + 
+  theme(legend.position = "none")
+
+# Total Touchdown test
+ggplot(pd2024, aes(TD_pass, Average.Salary, color=Player)) + geom_point() +
+  geom_text_repel(aes(label = 
+    ifelse(
+      (TD_pass > quantile(TD_pass, .75) & Average.Salary < 2e+07) | (TD_pass < quantile(TD_pass, .25) & Average.Salary > 2e+07),  
+      paste(gsub("[^A-Z]+", ".", Player), sub("20", "", paste(Year))),
+      ""
+    ) 
+  )) +
+  labs(
+    title = "Passing TD v Average Salary, Overperformers and Underperformers labeled",
+    y = "Average Salary",
+    x = "Passing Touchdowns"
+  ) + 
+  theme(legend.position = "none")
+```
+
+# Training the Model
+
+Training Data Generation
+```{r}
+# Use these to get static values to remove outliers with
+QBR_q1 <- quantile(QB_Data$QBR , .25)
+QBR_q3 <- quantile(QB_Data$QBR , .75)
+Rtg_q1 <- quantile(QB_Data$Rate, .25)
+Rtg_q3 <- quantile(QB_Data$Rate, .75)
+
+
+possible_predictors <- QB_Data[,c(3, 6, 7, 9:18, 20:32, 35:39)] %>%# Extract columns we wanna use
+  filter(G > 8) %>%
+  filter(QBR < QBR_q3 | Average.Salary > 2e+07) %>%
+  filter(QBR > QBR_q1 | Average.Salary < 2e+07) %>%
+  filter(Rate < Rtg_q3 | Average.Salary > 2e+07) %>%
+  filter(Rate > Rtg_q1 | Average.Salary < 2e+07)
+
+
+# Train a dummy model on all predictors just to get importance graph
+set.seed(12345)
+dummy_model <- randomForest(
+  formula = Average.Salary ~ .,
+  data = possible_predictors,
+  ntree = 1000, # Arbitrarily high number of trees for importance certainty
+  mtry = 4      # This number probably matters lmao
+)
+
+nrow(possible_predictors)
+varImpPlot(dummy_model)
+apply(importance(dummy_model), 2, function(x) sort(x, decreasing=TRUE))
+plot(dummy_model)
+```
+
+Select most important predictors and train first model
+- Note: I've only selected predictors that are easily obtainable
+- Advanced Stats like Any.A (Adjusted Net Yards per Pass attempt) are good predictors but they're generally hard to obtain
+- Depending on our deliverable scope, we could add them in later.
+- I'm including QBR and Rating for advanced statistics because they're more common
+```{r}
+set.seed(12345)
+span_model <- randomForest(
+  formula = Average.Salary ~ QBR + Rate + Y.G_pass + Att_pass + TD_pass + Y.G_rush,
+  data = possible_predictors,
+  ntree = 200, # let's mess with this value later. The higher this gets, the more prone to overfitting
+  mtry = 3 # Tested with 3 and 4, basically the same
+)
+
+span_model$mse[200]
+span_model$rsq[200]
+
+predictions <- as.vector(predict(span_model, newdata = QB_Data))
+res <- data.frame(
+  Name = QB_Data$Player,
+  Year = QB_Data$Year,
+  Salary = QB_Data$Average.Salary,
+  Predicted_Salary = predictions,
+  Diff = predictions - QB_Data$Average.Salary,
+  PDiff = predictions / QB_Data$Average.Salary
+)
+
+# Some testers
+res %>% arrange(desc(Predicted_Salary))
+res %>% arrange(desc(Predicted_Salary)) %>% filter(Year == 2024)
+res %>% arrange(desc(Year)) %>% filter(Name == "Brock Purdy")
+```
+Let's see how well it predicts contract year AAV
+```{r}
+Contract_year_datapoints <- QB_Data %>% filter(Year == Start.Year-1)
+predictions <- as.vector(predict(span_model, newdata = Contract_year_datapoints))
+res <- data.frame(
+  Name = Contract_year_datapoints$Player,
+  Year = Contract_year_datapoints$Year,
+  Salary = Contract_year_datapoints$Average.Salary,
+  Predicted_Salary = predictions,
+  Diff = predictions - Contract_year_datapoints$Average.Salary,
+  PDiff = predictions / Contract_year_datapoints$Average.Salary
+)
+res %>% arrange(desc(Predicted_Salary))
+```
+
+Test outputs with manually inserted data
+```{r}
+new_data <- data.frame(
+  Player = "D'Brickshaw Ferguson",
+  QBR = 74,
+  Rate = 81,
+  Y.G_pass = 5,
+  Att_pass = 24,
+  TD_pass = 8,
+  Y.G_rush = 20,
+  Average.Salary = 2
+)
+
+predictions <- as.vector(predict(span_model, new_data))
+res <- data.frame(
+  Name = new_data$Player,
+  Salary = new_data$Average.Salary,
+  Predicted_Salary = predictions,
+  Diff = predictions - new_data$Average.Salary,
+  PDiff = predictions / new_data$Average.Salary
+)
+res %>% arrange(desc(Predicted_Salary))
+```
+
+Potential improvements:
+- Historical contract data via OTC
+- Average over years to contract -> contract value
+- Use XGBoost or a different regression model
+  - I think XGBoost will be better, I have no idea truthfully
