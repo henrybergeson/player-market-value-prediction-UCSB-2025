@@ -1,0 +1,296 @@
+---
+title: "QB Salary Prediction"
+output: html_document
+date: "2025-03-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Packages and Data Import
+```{r}
+# Packages, install if necessary
+library(dplyr)
+library(randomForest)
+library(ggplot2)
+library(ggrepel)
+library(gridExtra)
+
+# Straight from github repo, assumes all files in same directory
+Salary_Data <- read.csv("./NFL Salary Data.csv")
+Receiving_Data <- read.csv("./Receiving Data.csv")
+Rushing_Data <- read.csv("./Rushing Data.csv")
+```
+
+Formatting Data
+```{r}
+# Format Player_Data
+# Remove space in team name and format dollar amounts into integers
+Salary_Data <- Salary_Data %>% 
+  mutate(Team.Currently.With = gsub("\\n.+", "", Team.Currently.With)) %>%
+  mutate(
+    Value = as.numeric(gsub("[$,]", "", Value)),
+    Average.Salary = as.numeric(gsub("[$,]", "", Average.Salary)),
+    Practical.Guarantee = as.numeric(gsub("[$,]", "", Practical.Guarantee)),
+    Guarantee.at.Sign = as.numeric(gsub("[$,]", "", Guarantee.at.Sign))
+  )
+
+Receiver_Salary <- Salary_Data %>%
+  filter(Pos == "WR" | Pos == "TE") %>% 
+  select(Player, Average.Salary, Age.At.Signing, Start.Year) # Change Average.Salary if we want to use total contract or years
+
+Receiver_Rushing_Data <- Rushing_Data %>% 
+  filter(Pos == "WR" | Pos == "TE") %>%
+  select(Player, Year, Att, Yds, TD, Y.G)
+
+Receiver_Data <- Receiving_Data %>%
+  left_join(Receiver_Rushing_Data, by= c("Player","Year"), suffix = c("_receive", "_rush")) %>% # Add in rushing data
+  left_join(Receiver_Salary, by = "Player") %>% # Add in Salary Data
+  filter(!is.na(Average.Salary)) %>%
+  filter(R.G > 2)
+
+# Replace NAs
+Receiver_Data[is.na(Receiver_Data)] <- 0
+
+# Remove duplicates
+Receiver_Data <- Receiver_Data[!duplicated(Receiver_Data[c("Player", "Year")]), ]
+
+
+nrow(Receiver_Data)
+```
+
+# Exploratory Data Analysis
+
+Outlier Bounds via Quantiles
+```{r warning=F} 
+# Outlier testing
+pd2024 <- Receiver_Data
+
+quantilePlot <- function(df, col, title = col) {
+  Q1 <- quantile(df[[col]], .25)
+  Median <- quantile(df[[col]], .5)
+  Q3 <- quantile(df[[col]], .75)
+  IQR <- Q3 - Q1
+  lower <- Q1 - 1.5 * IQR
+  upper <- Q3 + 1.5 * IQR
+  
+  return(
+    ggplot(df, aes(x = 0, y=.data[[col]])) +
+    geom_boxplot() +
+    geom_label(data = df, aes(y = Q1, label = paste("Q1:", round(Q1, 2)))) +
+    geom_label(data = df, aes(y = Median, label = paste("Median:", round(Median, 2)))) +
+    geom_label(data = df, aes(y = Q3, label = paste("Q3:", round(Q3, 2)))) +
+    geom_text_repel(aes(label = 
+      ifelse(
+        .data[[col]] < lower | .data[[col]] > upper,
+        paste(gsub(".+ ", "", Player), Year), ""
+      )
+    )) +
+    labs(x = "", y = "", title = title)
+  )
+}
+
+
+grid.arrange(
+  quantilePlot(pd2024, "Y.G_receive", "Receiving Yards/Game"),
+  quantilePlot(pd2024, "R.G", "Receptions/Game"),
+  quantilePlot(pd2024, "Tgt", "Total Targets"),
+  quantilePlot(pd2024, "TD_receive", "Touchdown Receptions"),
+  nrow=2, ncol=2, top = "Performance metric Quantiles:"
+)
+```
+
+Outlier Visualization based on Bounds
+```{r}
+salary_threshold <- mean(pd2024$Average.Salary)
+
+# Contract v Age test
+ggplot(Receiver_Salary, aes(Age.At.Signing, Average.Salary)) + geom_point() +
+  # geom_text_repel(aes(label = Player)) +  # idt we neeeed names here
+  theme(legend.position = "none") +
+  labs(
+    title = "How Age affects Contract Value",
+    y="Yearly Salary signed for",
+    x = "Age at Contract Signing"
+  )
+
+# QBR Outlier Test
+ggplot(pd2024, aes(Y.G_receive, Average.Salary, color=Player)) + geom_point() +
+  geom_text_repel(aes(label = 
+    ifelse(
+      (Y.G_receive > quantile(Y.G_receive, .75) & Average.Salary < salary_threshold) | (Y.G_receive < quantile(Y.G_receive, .25) & Average.Salary > salary_threshold),
+      paste(gsub("[^A-Z]+", ".", Player), sub("20", "", paste(Year))),
+      ""
+    ) 
+  )) +
+  labs(
+    title = "Yards/Game vs Average Salary, Overperformers and Underperformers labeled",
+    y = "Average Salary"
+  ) + 
+  theme(legend.position = "none")
+
+# Passer Rating outlier test
+ggplot(pd2024, aes(R.G, Average.Salary, color=Player)) + geom_point() +
+  geom_text_repel(aes(label =
+    ifelse(
+      (R.G > quantile(R.G, .75) & Average.Salary < salary_threshold) | (R.G < quantile(R.G, .25) & Average.Salary > salary_threshold),
+      paste(gsub("[^A-Z]+", ".", Player), sub("20", "", paste(Year))),
+      ""
+    )
+  )) +
+  labs(
+    title = "Receptions/Game vs Average Salary, Overperformers and Underperformers labeled",
+    y = "Average Salary",
+    x = "Receptions/Game"
+  ) + 
+  theme(legend.position = "none")
+
+# Y.G Outlier test
+ggplot(pd2024, aes(Tgt, Average.Salary, color=Player)) + geom_point() +
+  geom_text_repel(aes(label = 
+    ifelse(
+      (Tgt > quantile(Tgt, .75) & Average.Salary < salary_threshold) | (Tgt < quantile(Tgt, .25) & Average.Salary > salary_threshold),  
+      paste(gsub("[^A-Z]+", ".", Player), sub("20", "", paste(Year))),
+      ""
+    ) 
+  )) +
+  labs(
+    title = "Targets v Average Salary, Overperformers and Underperformers labeled",
+    y = "Average Salary",
+    x = "Total Targets"
+  ) + 
+  theme(legend.position = "none")
+
+# Total Touchdown test
+ggplot(pd2024, aes(TD_receive, Average.Salary, color=Player)) + geom_point() +
+  geom_text_repel(aes(label = 
+    ifelse(
+      (TD_receive > quantile(TD_receive, .75) & Average.Salary < salary_threshold) | (TD_receive < quantile(TD_receive, .25) & Average.Salary > salary_threshold),  
+      paste(gsub("[^A-Z]+", ".", Player), sub("20", "", paste(Year))),
+      ""
+    ) 
+  )) +
+  labs(
+    title = "Receiving TD v Average Salary, Overperformers and Underperformers labeled",
+    y = "Average Salary",
+    x = "Receiving Touchdowns"
+  ) + 
+  theme(legend.position = "none")
+```
+
+
+# Training the Model
+
+Training Data Generation
+```{r}
+# Use these to get static values to remove outliers with
+YG_q1 <- quantile(Receiver_Data$Y.G_receive , .25)
+YG_q3 <- quantile(Receiver_Data$Y.G_receive , .75)
+RG_q1 <- quantile(Receiver_Data$R.G, .25)
+RG_q3 <- quantile(Receiver_Data$R.G, .75)
+
+
+possible_predictors <- Receiver_Data[,c(3, 5:20, 22:29)] %>% # Extract columns we wanna use
+ filter(Y.G_receive < YG_q3 | Average.Salary > mean(Average.Salary)) %>%
+ filter(Y.G_receive > YG_q1 | Average.Salary < mean(Average.Salary)) %>%
+ filter(R.G < RG_q3 | Average.Salary > mean(Average.Salary)) %>%
+ filter(R.G > RG_q1 | Average.Salary < mean(Average.Salary))
+
+
+# Train a dummy model on all predictors just to get importance graph
+set.seed(12345)
+dummy_model <- randomForest(
+  formula = Average.Salary ~ .,
+  data = possible_predictors,
+  ntree = 1000, # Arbitrarily high number of trees for importance certainty
+  mtry = 4      # This number probably matters lmao
+)
+
+nrow(possible_predictors)
+varImpPlot(dummy_model)
+apply(importance(dummy_model), 2, function(x) sort(x, decreasing=TRUE))
+plot(dummy_model)
+```
+
+Select most important predictors and train first model
+```{r}
+set.seed(12345)
+span_model <- randomForest(
+  formula = Average.Salary ~ Y.G_receive + R.G + Tgt + TD_receive,
+  data = possible_predictors,
+  ntree = 200, # let's mess with this value later. The higher this gets, the more prone to overfitting
+  mtry = 3 # Tested with 3 and 4, basically the same
+)
+
+span_model$mse[200]
+span_model$rsq[200]
+
+predictions <- as.vector(predict(span_model, newdata = Receiver_Data))
+res <- data.frame(
+  Name = Receiver_Data$Player,
+  Year = Receiver_Data$Year,
+  Salary = Receiver_Data$Average.Salary,
+  Predicted_Salary = predictions,
+  Diff = predictions - Receiver_Data$Average.Salary,
+  PDiff = predictions / Receiver_Data$Average.Salary
+)
+
+# Some testers
+res %>% arrange(desc(Predicted_Salary))
+res %>% arrange(desc(Predicted_Salary)) %>% filter(Year == 2024)
+```
+
+Visualizing the difference
+```{r}
+ggplot(res %>% filter(Year == 2023) %>% arrange(desc(Predicted_Salary)) %>% slice_head(n=30), 
+       aes(x = Salary, xend = Predicted_Salary, y = reorder(Name, Predicted_Salary))) +
+  geom_segment(aes(yend = Name)) +
+  geom_point(aes(y = Name, x = Salary), color="red") + 
+  geom_point(aes(y = Name, x = Predicted_Salary), color="blue")
+```
+
+Let's see how well it predicts contract year AAV
+```{r}
+Contract_year_datapoints <- Receiver_Data %>% filter(Year == Start.Year-1)
+predictions <- as.vector(predict(span_model, newdata = Contract_year_datapoints))
+res <- data.frame(
+  Name = Contract_year_datapoints$Player,
+  Year = Contract_year_datapoints$Year,
+  Salary = Contract_year_datapoints$Average.Salary,
+  Predicted_Salary = predictions,
+  Diff = predictions - Contract_year_datapoints$Average.Salary,
+  PDiff = predictions / Contract_year_datapoints$Average.Salary
+)
+res %>% arrange(desc(Predicted_Salary))
+```
+
+Test outputs with manually inserted data
+```{r}
+new_data <- data.frame(
+  Player = "D'Brickshaw Ferguson",
+  QBR = 74,
+  Rate = 100,
+  Y.G_pass = 265,
+  Att_pass = 450,
+  TD_pass = 25,
+  Y.G_rush = 20,
+  Average.Salary = 2
+)
+
+predictions <- as.vector(predict(span_model, new_data))
+res <- data.frame(
+  Name = new_data$Player,
+  Salary = new_data$Average.Salary,
+  Predicted_Salary = predictions,
+  Diff = predictions - new_data$Average.Salary,
+  PDiff = predictions / new_data$Average.Salary
+)
+res %>% arrange(desc(Predicted_Salary))
+```
+
+Potential improvements:
+- Historical contract data via OTC
+- Average over years to contract -> contract value
+- Use XGBoost or a different regression model
+  - I think XGBoost will be better, I have no idea truthfully

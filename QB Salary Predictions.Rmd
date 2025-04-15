@@ -16,6 +16,8 @@ library(randomForest)
 library(ggplot2)
 library(ggrepel)
 library(gridExtra)
+library(xgboost)
+library(Matrix)
 
 # Straight from github repo, assumes all files in same directory
 Salary_Data <- read.csv("./NFL Salary Data.csv")
@@ -122,12 +124,12 @@ ggplot(pd2024, aes(QBR, Average.Salary, color=Player)) + geom_point() +
 
 # Passer Rating outlier test
 ggplot(pd2024, aes(Rate, Average.Salary, color=Player)) + geom_point() +
-  geom_text_repel(aes(label = 
+  geom_text_repel(aes(label =
     ifelse(
-      (Rate > quantile(Rate, .75) & Average.Salary < 2e+07) | (Rate < quantile(Rate, .25) & Average.Salary > 2e+07),  
+      (Rate > quantile(Rate, .75) & Average.Salary < 2e+07) | (Rate < quantile(Rate, .25) & Average.Salary > 2e+07),
       paste(gsub("[^A-Z]+", ".", Player), sub("20", "", paste(Year))),
       ""
-    ) 
+    )
   )) +
   labs(
     title = "Passer Rating vs Average Salary, Overperformers and Underperformers labeled",
@@ -168,6 +170,12 @@ ggplot(pd2024, aes(TD_pass, Average.Salary, color=Player)) + geom_point() +
   ) + 
   theme(legend.position = "none")
 ```
+```{r}
+QB_Data %>% filter(Average.Salary > 2e+07)
+plot(Average.Salary ~ QBR, data=QB_Data  %>% filter(Average.Salary > 2e+07))
+plot(Average.Salary ~ QBR, data=QB_Data  %>% filter(Average.Salary < 2e+07))
+```
+
 
 # Training the Model
 
@@ -180,24 +188,30 @@ Rtg_q1 <- quantile(QB_Data$Rate, .25)
 Rtg_q3 <- quantile(QB_Data$Rate, .75)
 
 
-possible_predictors <- QB_Data[,c(3, 6, 7, 9:18, 20:32, 35:39)] %>%# Extract columns we wanna use
+possible_predictors <- QB_Data[,c(3, 6, 7, 9:18, 20:32, 35:41)]# Extract columns we wanna use
+model_dataset <- possible_predictors %>%
   filter(G > 8) %>%
   filter(QBR < QBR_q3 | Average.Salary > 2e+07) %>%
   filter(QBR > QBR_q1 | Average.Salary < 2e+07) %>%
   filter(Rate < Rtg_q3 | Average.Salary > 2e+07) %>%
   filter(Rate > Rtg_q1 | Average.Salary < 2e+07)
 
+# Create train/test split at 80/20
+train_indices <- sample(1:nrow(model_dataset), .8 * nrow(model_dataset))
+training_data <- model_dataset[train_indices,]
+testing_data  <- model_dataset[-train_indices,]
+
 
 # Train a dummy model on all predictors just to get importance graph
 set.seed(12345)
 dummy_model <- randomForest(
   formula = Average.Salary ~ .,
-  data = possible_predictors,
+  data = training_data,
   ntree = 1000, # Arbitrarily high number of trees for importance certainty
   mtry = 4      # This number probably matters lmao
 )
 
-nrow(possible_predictors)
+nrow(training_data)
 varImpPlot(dummy_model)
 apply(importance(dummy_model), 2, function(x) sort(x, decreasing=TRUE))
 plot(dummy_model)
@@ -212,13 +226,22 @@ Select most important predictors and train first model
 set.seed(12345)
 span_model <- randomForest(
   formula = Average.Salary ~ QBR + Rate + Y.G_pass + Att_pass + TD_pass + Y.G_rush,
-  data = possible_predictors,
+  data = training_data,
   ntree = 200, # let's mess with this value later. The higher this gets, the more prone to overfitting
   mtry = 3 # Tested with 3 and 4, basically the same
 )
 
-span_model$mse[200]
 span_model$rsq[200]
+
+# Testing accuracy
+tpred <- as.vector(predict(span_model, newdata = testing_data))
+
+# RSME
+sqrt(mean((tpred - testing_data$Average.Salary)^2))
+# Mean Average Error
+mean(abs(tpred - testing_data$Average.Salary))
+#R^2
+1 - sum((testing_data$Average.Salary - tpred)^2) / sum((testing_data$Average.Salary - mean(testing_data$Average.Salary))^2)
 
 predictions <- as.vector(predict(span_model, newdata = QB_Data))
 res <- data.frame(
@@ -233,8 +256,17 @@ res <- data.frame(
 # Some testers
 res %>% arrange(desc(Predicted_Salary))
 res %>% arrange(desc(Predicted_Salary)) %>% filter(Year == 2024)
-res %>% arrange(desc(Year)) %>% filter(Name == "Brock Purdy")
+res %>% arrange(desc(Year)) %>% filter(Name == "Aaron Rodgers")
 ```
+Visualize accuracy
+```{r}
+ggplot(res %>% arrange(desc(Predicted_Salary)) %>% slice_head(n=30), 
+       aes(x = Salary, xend = Predicted_Salary, y = reorder(Name, Predicted_Salary))) +
+  geom_segment(aes(yend = Name)) +
+  geom_point(aes(y = Name, x = Salary), color="red") + 
+  geom_point(aes(y = Name, x = Predicted_Salary), color="blue")
+```
+
 Let's see how well it predicts contract year AAV
 ```{r}
 Contract_year_datapoints <- QB_Data %>% filter(Year == Start.Year-1)
@@ -244,10 +276,11 @@ res <- data.frame(
   Year = Contract_year_datapoints$Year,
   Salary = Contract_year_datapoints$Average.Salary,
   Predicted_Salary = predictions,
-  Diff = predictions - Contract_year_datapoints$Average.Salary,
-  PDiff = predictions / Contract_year_datapoints$Average.Salary
+  Diff = abs(predictions - Contract_year_datapoints$Average.Salary),
+  Accuracy = abs(predictions - Contract_year_datapoints$Average.Salary) / predictions
 )
 res %>% arrange(desc(Predicted_Salary))
+print(paste("Accuracy: ", mean(res$Accuracy)) )
 ```
 
 Test outputs with manually inserted data
@@ -255,24 +288,82 @@ Test outputs with manually inserted data
 new_data <- data.frame(
   Player = "D'Brickshaw Ferguson",
   QBR = 74,
-  Rate = 81,
-  Y.G_pass = 5,
-  Att_pass = 24,
-  TD_pass = 8,
+  Rate = 100,
+  Y.G_pass = 265,
+  Att_pass = 450,
+  TD_pass = 25,
   Y.G_rush = 20,
   Average.Salary = 2
 )
 
 predictions <- as.vector(predict(span_model, new_data))
 res <- data.frame(
-  Name = new_data$Player,
-  Salary = new_data$Average.Salary,
+  Name = possible_predictors_with_names$Player,
+  Salary = possible_predictors_with_names$Average.Salary,
   Predicted_Salary = predictions,
-  Diff = predictions - new_data$Average.Salary,
-  PDiff = predictions / new_data$Average.Salary
+  Diff = predictions - possible_predictors_with_names$Average.Salary,
+  PDiff = predictions / possible_predictors_with_names$Average.Salary
 )
 res %>% arrange(desc(Predicted_Salary))
 ```
+
+---
+
+Now let's try XGBoost
+
+Convert everything into the xgboost data format
+```{r}
+to_xgb <- function(data){
+  return(xgb.DMatrix(
+    data = sparse.model.matrix(data$Average.Salary ~ . - 1, data = data), 
+    label = data$Average.Salary
+  ))
+}
+
+train_inputs_xgb <- 
+xgb_train_1 <- to_xgb(training_data)
+```
+
+Train da model
+```{r}
+xgb_model_1 <- xgb.train(
+  params = list(
+    objective = "reg:squarederror",
+    eta = .1,
+    max_depth = 6,
+    subsample = 0.8,
+    colsample_bytree = 0.8
+  ),
+  data = xgb_train_1,
+  nrounds = 100
+)
+```
+
+```{r}
+
+possible_predictors_with_names <- QB_Data[,c(2:3, 6, 7, 9:18, 20:32, 35:41)]# Extract columns we wanna use
+named_training_data <- possible_predictors_with_names %>%
+  filter(G > 8) %>%
+  filter(QBR < QBR_q3 | Average.Salary > 2e+07) %>%
+  filter(QBR > QBR_q1 | Average.Salary < 2e+07) %>%
+  filter(Rate < Rtg_q3 | Average.Salary > 2e+07) %>%
+  filter(Rate > Rtg_q1 | Average.Salary < 2e+07)
+
+# xgb.plot.importance(xgb.importance(model = xgb_model_1))
+predictions <- as.vector(predict(xgb_model_1, to_xgb(possible_predictors)))
+res <- data.frame(
+  Name = QB_Data$Player,
+  Year = QB_Data$Year,
+  Salary = QB_Data$Average.Salary,
+  Predicted_Salary = predictions,
+  Diff = predictions - QB_Data$Average.Salary,
+  PDiff = predictions / QB_Data$Average.Salary
+)
+res %>% arrange(desc(Predicted_Salary)) %>% filter(Year == 2024)
+```
+What we've learnned about xgboost
+- Not gonna work on this much data lmao
+
 
 Potential improvements:
 - Historical contract data via OTC

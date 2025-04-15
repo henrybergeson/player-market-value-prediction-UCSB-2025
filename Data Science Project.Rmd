@@ -13,10 +13,9 @@ Testing Data
 
 ```{r, warning=FALSE}
 library(readxl)
-library(dplyr)
 library(writexl)
-library(readxl)
-player_Data <- read_excel("C:/Users/2chas/Downloads/Data Science Project/Player Data 2.xlsx")
+library(dplyr)
+player_Data <- read.csv("./Player Data 2.xlsx")
 totalSalaryData <- player_Data$Value
 totalAverageSalaryData <- player_Data$Average
 totalGuaranteeData <- player_Data$Gaurantee
@@ -33,10 +32,7 @@ Average <- mean(totalSalaryData)
     ##}
   ##})
 ##write_xlsx(data = player_Data, "formattedPlayerData.xlsx")
-library(readxl)
-library(readxl)
-library(readxl)
-Passing_Data <- read_excel("C:/Users/2chas/Downloads/Data Science Project/Passing Data.xlsx")
+Passing_Data <- read_excel("./Passing Data.xlsx")
 head(Passing_Data)
 
 ```
@@ -49,7 +45,6 @@ Passing_Data$Salary[is.na(Passing_Data$Salary)] <- median(Passing_Data$Salary, n
 str(Passing_Data)
 ```
 
-
 ```{r}
 median(Passing_Data$Salary, na.rm = TRUE)
 sum(is.na(Passing_Data$Salary)) 
@@ -59,17 +54,20 @@ Passing_Data$Salary[Passing_Data$Salary == "NA"] <- NA
 sum(is.na(Passing_Data$Salary)) 
 str(Passing_Data$Salary)
 any(is.infinite(Passing_Data$Salary))
+```
+
+```{r}
 library(readxl)
-player_Data <- read_excel("C:/Users/2chas/Downloads/NFL Salary Data.xlsx")
-Passing_Data <- read_excel("C:/Users/2chas/Downloads/Data Science Project/Passing Data.xlsx")
+player_Data <- read.csv("./NFL Salary Data.csv")
+Passing_Data <- read.csv("./Passing Data.csv")
 head(Passing_Data)
 sum(!complete.cases(Passing_Data))
-Passing_Data$Salary[is.na(Passing_Data$Salary)] <- median(Passing_Data$Salary, na.rm = TRUE)
+Passing_Data$Salary[is.na(Passing_Data$Salary)] <- median(player_Data$Salary, na.rm = TRUE)
 
 
 
 library(dplyr)
-df2Select <- player_Data %>% select(Player, Salary)
+df2Select <- player_Data %>% select(Player, Average.Salary)
 dataMerge <- Passing_Data %>%
   left_join(df2Select, by = "Player")
 
@@ -88,12 +86,13 @@ colnames(dataMergeClean) <- gsub("/", "per", colnames(dataMergeClean))
 colnames(dataMergeClean) <- gsub("4", "four", colnames(dataMergeClean))
 
 ```
+
 ```{r}
 
 set.seed(12345)
 model <- randomForest(
   formula = Salary.y ~ Att + Yds + TD + Int + Age,
-  data = dataMergeClean
+  data = dataMerge
 )
 model
 
@@ -104,11 +103,7 @@ sqrt(model$mse[which.min(model$mse)])
 varImpPlot(model)
 
 model_tuned <- tuneRF(
-  x = dataMergeClean[,-1]
+  x = dataMergeClean
   
 )
 ```
-
-
-
-
