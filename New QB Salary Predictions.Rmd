@@ -1,0 +1,150 @@
+---
+title: "New QB Salary Predictions"
+output: html_document
+date: "2025-04-22"
+---
+
+Packages and Data Import
+```{r}
+# Packages, install if necessary
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(randomForest)
+
+# Straight from github repo, assumes all files in same directory
+Salary_Data <- read.csv("./Player Salary QB.csv")
+Passing_Data <- read.csv("./1999-2024 Passing Data.csv")
+```
+
+```{r}
+Salary_Data <- Salary_Data %>% 
+  mutate(
+    Value = as.numeric(gsub("[$,]", "", Value)),
+    APY = as.numeric(gsub("[$,]", "", APY)),
+    Guaranteed = as.numeric(gsub("[$,]", "", Guaranteed)),
+) %>% select(X, Player, Year.Signed, Years, Value, APY, Guaranteed, APY.as...Of.Cap.At.Signing) %>%
+  filter(Year.Signed > 2000) %>% distinct() %>% mutate(Year.End = Year.Signed + Years)
+
+QB_Data <- Passing_Data %>%
+  inner_join(Salary_Data, by="Player") %>%
+  filter(Year >= Year.Signed, Year < Year.End) %>%
+  filter(Year > 2005) %>%
+  filter(!is.na(QBR)) %>%
+  filter(Att > 200) %>% 
+  group_by(Player, Year) %>%
+  slice_max(Year.Signed) %>%
+  ungroup()
+
+# Phillip Rivers for one season in particular does not have an Success rate for some fucking reason
+QB_Data[is.na(QB_Data)] <- 0
+
+nrow(QB_Data)
+```
+
+```{r}
+ggplot(Salary_Data, aes(x=Year.Signed, y=APY)) + geom_point() 
+```
+
+```{r}
+ggplot(QB_Data, aes(QBR, APY, color=Player)) + geom_point() +
+  geom_text_repel(aes(label = 
+    ifelse(
+      (QBR > quantile(QBR, .75) & APY < mean(APY)) | (QBR < quantile(QBR, .25) & APY > mean(APY)),  
+      paste(gsub("[^A-Z]+", ".", Player), sub("20", "", paste(Year))),
+      ""
+    ) 
+  )) +
+  labs(
+    title = "QBR vs Average Salary, Overperformers and Underperformers labeled",
+    y = "Average Salary"
+  ) + 
+  theme(legend.position = "none")
+```
+
+```{r}
+ggplot(QB_Data) +
+  geom_rect(aes(xmin = 0, xmax = quantile(QBR, .25), ymin = mean(APY), ymax = max(APY)), fill = 'lightcoral', alpha=.002, color = 'black', size=.01) +
+  geom_rect(aes(xmin = quantile(QBR, .75), xmax = max(QBR), ymin = min(APY), ymax = mean(APY)), fill = 'skyblue', alpha=.005, color = 'black', size = .01) +
+  annotate("text", 
+         x = mean(c(0, quantile(QB_Data$QBR, .25))), 
+         y = max(QB_Data$APY), 
+         label = "Underperformers", 
+         hjust = 0.5, vjust = -0.5,
+         fontface = "bold", size = 3.5, color = "darkred") +
+  annotate("text", 
+         x = mean(c(quantile(QB_Data$QBR, .875), max(QB_Data$QBR))), 
+         y = min(QB_Data$APY), 
+         label = "Overperformers", 
+         hjust = 0.5, vjust = 1.5,
+         fontface = "bold", size = 3.5, color = "darkblue") + 
+  geom_point(aes(QBR, APY, fill=Player),shape = 21, size = 1.75, color = "black", stroke = 0.4) +
+  labs(
+    title = "QBR vs Average Salary, Overperformers and Underperformers labeled",
+    y = "Average Salary"
+  ) +
+  theme(legend.position = "none")
+```
+
+
+RF MODEL TRAINING
+
+```{r}
+QBR_q1 <- quantile(QB_Data$QBR , .25)
+QBR_q3 <- quantile(QB_Data$QBR , .75)
+Rtg_q1 <- quantile(QB_Data$Rate, .25)
+Rtg_q3 <- quantile(QB_Data$Rate, .75)
+
+possible_predictors <- QB_Data[,c(2,5:6,8:31, 33:39)]# Extract columns we wanna use
+model_dataset <- possible_predictors %>%
+  filter(QBR < QBR_q3 | APY > 2e+07) %>%
+  filter(QBR > QBR_q1 | APY < 2e+07) %>%
+  filter(Rate < Rtg_q3 | APY > 2e+07) %>%
+  filter(Rate > Rtg_q1 | APY < 2e+07)
+
+set.seed(12345)
+span_model <- randomForest(
+  formula = APY ~ .,
+  data = model_dataset,
+  ntree = 1000,
+  mtry = 4
+)
+
+nrow(model_dataset)
+varImpPlot(span_model)
+apply(importance(span_model), 2, function(x) sort(x, decreasing=TRUE))
+plot(span_model)
+```
+
+```{r}
+QB_Salary_predictor_rf <- randomForest(
+  formula = APY ~ Rate + QBR + Cmp. + Year,
+  data = model_dataset,
+  ntree = 200,
+  mtry = 3
+)
+
+QB_Salary_predictor_rf$rsq[200]
+```
+
+```{r}
+base_predictions <- as.vector(predict(QB_Salary_predictor_rf, newdata = QB_Data))
+res <- data.frame(
+  Name = QB_Data$Player,
+  Year = QB_Data$Year,
+  Salary = QB_Data$APY,
+  Predicted_Salary = base_predictions,
+  Diff = base_predictions - QB_Data$APY,
+  PDiff = base_predictions / QB_Data$APY
+)
+
+res %>% filter(Year == 2023) %>% arrange(desc(Predicted_Salary))
+```
+
+```{r}
+ggplot(QB_Data %>% filter(Player == "Josh Allen"), aes(x = Year)) + 
+  geom_line(aes(y = QBR * max(QB_Data$APY) / max(QB_Data$QBR), color = "QBR")) +
+  geom_line(aes(y = APY, color = "APY"))
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
