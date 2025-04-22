@@ -24,21 +24,29 @@ Salary_Data <- Salary_Data %>%
 ) %>% select(X, Player, Year.Signed, Years, Value, APY, Guaranteed, APY.as...Of.Cap.At.Signing) %>%
   filter(Year.Signed > 2000) %>% distinct() %>% mutate(Year.End = Year.Signed + Years)
 
-QB_Data <- Passing_Data %>%
-  inner_join(Salary_Data, by="Player") %>%
-  filter(Year >= Year.Signed, Year <= Year.End) %>%
-  group_by(Player, Year) %>%
-  slice_max(Year.Signed) %>%
-  ungroup()
-
+QB_Data <- bind_rows(
+  Passing_Data %>%
+    inner_join(Salary_Data, by = "Player") %>%
+    filter(Year < Year.Signed) %>%
+    group_by(Player, Year) %>%
+    slice_min(Year.Signed, with_ties = FALSE),
   
+  Passing_Data %>%
+    inner_join(Salary_Data, by = "Player") %>%
+    filter(Year >= Year.Signed) %>%
+    group_by(Player, Year) %>%
+    slice_max(Year.Signed, with_ties = FALSE)
+  ) %>% ungroup() %>% distinct(Player, Year, .keep_all = TRUE) %>%
+  filter(Year > 2005) %>%
+  filter(!is.na(QBR)) %>%
+  filter(Att > 200)
+
+# Phillip Rivers for one season in particular does not have an Success rate for some fucking reason
+QB_Data[is.na(QB_Data)] <- 0
+
+nrow(QB_Data)
 ```
 
 ```{r}
 ggplot(Salary_Data, aes(x=Year.Signed, y=APY)) + geom_point() 
 ```
-
-```{r}
-
-```
-

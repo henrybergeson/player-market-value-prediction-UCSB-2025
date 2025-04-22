@@ -17,6 +17,7 @@ Salary_Data <- read.csv("./Player Salary QB.csv")
 Passing_Data <- read.csv("./1999-2024 Passing Data.csv")
 ```
 
+
 ```{r}
 Salary_Data <- Salary_Data %>% 
   mutate(
@@ -26,15 +27,22 @@ Salary_Data <- Salary_Data %>%
 ) %>% select(X, Player, Year.Signed, Years, Value, APY, Guaranteed, APY.as...Of.Cap.At.Signing) %>%
   filter(Year.Signed > 2000) %>% distinct() %>% mutate(Year.End = Year.Signed + Years)
 
-QB_Data <- Passing_Data %>%
-  inner_join(Salary_Data, by="Player") %>%
-  filter(Year >= Year.Signed, Year < Year.End) %>%
+QB_Data <- bind_rows(
+  Passing_Data %>%
+    inner_join(Salary_Data, by = "Player") %>%
+    filter(Year < Year.Signed) %>%
+    group_by(Player, Year) %>%
+    slice_min(Year.Signed, with_ties = FALSE),
+  
+  Passing_Data %>%
+    inner_join(Salary_Data, by = "Player") %>%
+    filter(Year >= Year.Signed) %>%
+    group_by(Player, Year) %>%
+    slice_max(Year.Signed, with_ties = FALSE)
+  ) %>% ungroup() %>% distinct(Player, Year, .keep_all = TRUE) %>%
   filter(Year > 2005) %>%
   filter(!is.na(QBR)) %>%
-  filter(Att > 200) %>% 
-  group_by(Player, Year) %>%
-  slice_max(Year.Signed) %>%
-  ungroup()
+  filter(Att > 200)
 
 # Phillip Rivers for one season in particular does not have an Success rate for some fucking reason
 QB_Data[is.na(QB_Data)] <- 0
@@ -88,7 +96,7 @@ ggplot(QB_Data) +
 
 
 RF MODEL TRAINING
-
+- We don't really care about those first 4 variables on the importance plot bc of sex
 ```{r}
 QBR_q1 <- quantile(QB_Data$QBR , .25)
 QBR_q3 <- quantile(QB_Data$QBR , .75)
@@ -138,13 +146,11 @@ res <- data.frame(
   PDiff = base_predictions / QB_Data$APY
 )
 
-res %>% filter(Year == 2023) %>% arrange(desc(Predicted_Salary))
+res %>% arrange(desc(Predicted_Salary))
 ```
 
 ```{r}
-ggplot(QB_Data %>% filter(Player == "Josh Allen"), aes(x = Year)) + 
+ggplot(QB_Data %>% filter(Player == "Aaron Rodgers"), aes(x = Year)) + 
   geom_line(aes(y = QBR * max(QB_Data$APY) / max(QB_Data$QBR), color = "QBR")) +
   geom_line(aes(y = APY, color = "APY"))
 ```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
