@@ -2,12 +2,26 @@
 <html>
 <head>
     <title>NFL Player Market Prediction</title>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <h1>Welcome to the NFL Free Agent Value Predictor</h1>
-    <p>Our model predicts the market value of NFL free agents based on performance data.</p>
-    <p>How To Use: Enter a current NFL player of choice</p>
+    <h1 class = "title">Welcome to the NFL Free Agent Value Predictor!</h1>
+    <p class = "description">Our model predicts the market value of NFL offensive players based on performance statistical data.</p>
+    <p class = "description"></p>
+    <p class = "description">How To Use:</p>
+
+
+        <li class ="description">Enter a current NFL player of choice</li>
+        <p class="description">
+            Example players: Saquon Barkley, Justin Jefferson, Josh Allen
+        </p>
+        <li class="description">Click the "Predict" button</li>
+
     <p>Player Name:</p>
-    <input type="text" id="playerName" placeholder="Enter player name">
+    <div class = "input-container">
+        <input type="text" id="playerName" placeholder="Enter player name">
+        <button id="predictButton">Predict</button>
+    </div>
+    
 </body>
 </html>
