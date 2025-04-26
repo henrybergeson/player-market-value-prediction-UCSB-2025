@@ -3,25 +3,85 @@
 <head>
     <title>NFL Player Market Prediction</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="script.js"></script>
 </head>
 <body>
-    <h1 class = "title">Welcome to the NFL Free Agent Value Predictor!</h1>
-    <p class = "description">Our model predicts the market value of NFL offensive players based on performance statistical data.</p>
-    <p class = "description"></p>
-    <p class = "description">How To Use:</p>
+    <h1 class="title">Welcome to the NFL Free Agent Value Predictor!</h1>
+    <p class="description">Our model predicts the market value of NFL offensive players based on performance statistical data.</p>
+    <p class="description"></p>
+    <p class="description">How To Use:</p>
 
+    <li class="description">Enter a current offensive NFL player of choice (Ex: Saquon Barkley, Justin Jefferson, Josh Allen)</li>
+    <li class="description">Select the position of player</li>
+    <li class="description">Enter in Statistics of your choosing</li>
+    <li class="description">Click the "Predict" button</li>
 
-        <li class ="description">Enter a current NFL player of choice</li>
-        <p class="description">
-            Example players: Saquon Barkley, Justin Jefferson, Josh Allen
-        </p>
-        <li class="description">Click the "Predict" button</li>
+    <!-- Common inputs that always show -->
+    <div class="common-inputs">
+        <div class="input-container">
+            <label for="playerName">Enter Player Name:</label>
+            <input type="text" id="playerName" placeholder="Enter player name">
+        </div>
 
-    <p>Player Name:</p>
-    <div class = "input-container">
-        <input type="text" id="playerName" placeholder="Enter player name">
+        <div class="input-container">
+            <label for="positionSelect">Select Player Position:</label>
+            <select id="positionSelect">
+                <option value="QB">Quarterback</option>
+                <option value="RB">Running Back</option>
+                <option value="WR">Wide Receiver</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Position specific stats -->
+    <div id="qbStats" class="stats-container" style="display: none;">
+        <h3>Quarterback Stats</h3>
+        <div class="input-container">
+            <label for="QBR">Quarterback Rating (QBR): </label>
+            <input type="number" id="QBR">
+        </div>
+        <div class="input-container">
+            <label for="Rating">Rating</label>
+            <input type="number" id="Rating">
+        </div>
+        <div class="CompletePer">
+            <label for="CompletePer">Completion Percentage</label>
+            <input type="number" id="CompletePer">
+        </div>
+    </div>
+
+    <div id="rbStats" class="stats-container" style="display: none;">
+        <h3>Running Back Stats</h3>
+        <div class="input-container">
+            <label for="rushingYards">Rushing Yards:</label>
+            <input type="number" id="rushingYards">
+        </div>
+        <div class="input-container">
+            <label for="rushingTD">Rushing TD:</label>
+            <input type="number" id="rushingTD">
+        </div>
+    </div>
+
+    <div id="wrStats" class="stats-container" style="display: none;">
+        <h3>Wide Receiver Stats</h3>
+        <div class="input-container">
+            <label for="YardsPerGame">Yards Per Game: </label>
+            <input type="number" id="YardsPerGame">
+        </div>
+        <div class="input-container">
+            <label for="ReceptionsPerGame">Receptions Per Game: </label>
+            <input type="number" id="ReceptionsPerGame">
+        </div>
+
+        <div class="input-container">
+            <label for="ReceptionsPerGame">Receptions Per Year: </label>
+            <input type="number" id="ReceptionsPerGame">
+        </div>
+    </div>
+
+    <!-- Move predict button to the bottom -->
+    <div class="button-container">
         <button id="predictButton">Predict</button>
     </div>
-    
 </body>
 </html>
