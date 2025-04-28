@@ -200,7 +200,7 @@ test <- subset(rb_df_cleaned, split == FALSE)
 
 ```{r}
 
-rb_model <- randomForest(APY ~ Year + Y.G.Rush + Total.Yds + Rec + T.G + G + Y.G.Rec + Age, ntree = 250, mtry = 4, data = train)
+rb_model <- randomForest(APY ~ Year + Y.G.Rush + Total.Yds + Rec + T.G + Y.G.Rec + Age, ntree = 250, mtry = 4, data = train)
 rb_model
 
 
