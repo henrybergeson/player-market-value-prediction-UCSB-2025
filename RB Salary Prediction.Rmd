@@ -1,0 +1,290 @@
+---
+title: "RB Salary Prediction"
+author: "Kotaro Ito"
+date: "2025-04-26"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(warn = -1)
+suppressPackageStartupMessages(library(randomForest))
+library(cowplot)
+library(readxl)
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(caret))
+library(caTools)
+library(randomForest)
+library(Metrics)
+library(tidyr)
+```
+
+# Data Setup
+
+
+```{r}
+rb_salary_csv <- read.csv("./Player Salary RB.csv")
+receiving_data_csv <- read.csv("./1999-2024 Receiving Data.csv")
+rushing_data_csv <- read.csv("./1999-2024 Rushing Data.csv")
+
+rb_stats <- full_join(receiving_data_csv, rushing_data_csv, by = c("Player", "Year")) %>%
+  mutate(
+    Total.Yds = coalesce(Yds.x, 0) + coalesce(Yds.y, 0)
+  )
+
+rb_salary_df <- rb_salary_csv %>%
+  mutate(Value = as.numeric(gsub("[$,]", "", Value)),
+         APY = as.numeric(gsub("[$,]", "", APY)),
+         Inflated.APY = as.numeric(gsub("[$,]", "", Inflated.APY))) %>%
+  select(Player, Year.Signed, APY, Inflated.APY)
+
+rb_df <- bind_rows(
+  rb_stats %>%
+    inner_join(rb_salary_df, by = "Player") %>%
+    filter(Year < Year.Signed) %>%
+    group_by(Player, Year) %>%
+    slice_min(Year.Signed, with_ties = FALSE),
+  
+  rb_stats %>%
+    inner_join(rb_salary_df, by = "Player") %>%
+    filter(Year >= Year.Signed) %>%
+    group_by(Player, Year) %>%
+    slice_max(Year.Signed, with_ties = FALSE)
+  ) %>% 
+  ungroup() %>% 
+  distinct(Player, Year, .keep_all = TRUE) %>%
+  filter(Year > 2005) %>%
+  transmute(
+    Player,
+    Age = Age.x,
+    G = G.x, 
+    GS = GS.x, 
+    Year.Signed,
+    APY,
+    Year,
+    Inflated.APY,
+    Rec,
+    Y.G.Rush = Y.G.y,
+    Y.G.Rec = Y.G.x,
+    Tgt,
+    Att,
+    Rec1D = X1D.x,
+    Rush1D = X1D.y,
+    Att.G = A.G,
+    Total.Yds
+  ) %>%
+  mutate(T.G = (Att + Tgt) / G)
+
+write.csv(rb_df, "rb_df")
+```
+
+# Outlier Removal
+
+```{r}
+ggplot(rb_df, aes(x = Total.Yds, y = APY, color = Player)) +
+  geom_rect(aes(xmin = 0, xmax = quantile(Total.Yds, .25), ymin = mean(APY), ymax = max(APY)), fill = 'red', alpha=.002, color = 'black', size=.01) +
+  geom_rect(aes(xmin = quantile(Total.Yds, .75), xmax = max(Total.Yds), ymin = min(APY), ymax = mean(APY)), fill = 'blue', alpha=.005, color = 'black', size = .01) +
+  geom_point(size = 3, alpha = 0.8) +
+  labs(
+    title = "Total Yards vs APY",
+    x = "Total Yards",
+    y = "Average Per Year (APY)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18, face = "bold"),
+    axis.title = element_text(size = 14),
+    legend.position = "none"  
+  )
+
+
+stats <- c('Age', 'G', 'GS', 'Year', 'Inflated.APY',
+           'Rec', 'Y.G.Rush', 'Tgt', 'Att', 'Rec1D', 'Rush1D', 'Att.G', 'Total.Yds')
+
+#Removing Outliers in Games Played
+rb_df_g_small <- rb_df %>%
+  filter(G > 0, G <= 10)
+
+rb_df_g_other <- rb_df %>%
+   filter(G > 10)
+
+smallg_apy_lower <- quantile(rb_df_g_small$APY, 0.05)
+smallg_apy_upper <- quantile(rb_df_g_small$APY, 0.95)
+
+rb_df_g_small <- rb_df_g_small %>%
+  filter(APY >= smallg_apy_lower, APY <= smallg_apy_upper)
+
+
+#Removing Outliers in Ages 25-28
+# rb_df_age_small <- rb_df %>%
+#   filter(Age > 25, Age <= 28)
+# 
+# rb_df_age_other <- rb_df %>%
+#   filter(Age <= 25 | Age > 28)
+# 
+# smallage_apy_lower <- quantile(rb_df_age_small$APY, 0.25)
+# smallage_apy_upper <- quantile(rb_df_age_other$APY, 0.75)
+
+# rb_df_age_small <- rb_df_age_small %>%
+#   filter(APY >= smallage_apy_lower, APY <= smallage_apy_upper)
+
+# Combine the two portions
+rb_df_cleaned <- bind_rows(
+  rb_df_g_small, 
+  rb_df_g_other)       
+#   rb_df_age_small
+# ) %>%
+#   distinct(Player, Year, .keep_all = TRUE)
+
+#Side by Side plots for All observations
+df_long <- rb_df %>%
+  pivot_longer(cols = all_of(stats), names_to = "Stat", values_to = "Value")
+ggplot(df_long, aes(x = Value, y = APY)) +
+  geom_point(alpha=0.7) +
+  facet_wrap(~ Stat, scales = "free_x") +
+  theme_minimal() +
+  labs(x = "Stat", y = "APY")
+
+#Side by Side plots for G>10 
+df_long_other <- rb_df_g_other %>%
+  pivot_longer(cols = all_of(stats), names_to = "Stat", values_to = "Value")        
+ggplot(df_long_other, aes(x = Value, y = APY)) +
+  geom_point(alpha=0.7) +
+  facet_wrap(~ Stat, scales = "free_x") +
+  theme_minimal() +
+  labs(x = "Stat", y = "APY")
+
+#Side by Side plots for G<=10(cleaned) 
+df_long_small <- rb_df_g_small %>%
+  pivot_longer(cols = all_of(stats), names_to = "Stat", values_to = "Value")        
+ggplot(df_long_small, aes(x = Value, y = APY)) +
+  geom_point(alpha=0.7) +
+  facet_wrap(~ Stat, scales = "free_x") +
+  theme_minimal() +
+  labs(x = "Stat", y = "APY")
+
+#Side by Side plots for All(Cleaned)
+df_long_cleaned <- rb_df_cleaned %>%
+  pivot_longer(cols = all_of(stats), names_to = "Stat", values_to = "Value")        
+ggplot(df_long_cleaned, aes(x = Value, y = APY)) +
+  geom_point(alpha=0.7) +
+  facet_wrap(~ Stat, scales = "free_x") +
+  theme_minimal() +
+  labs(x = "Stat", y = "APY")
+
+# Outlier Plot for G <= 10
+rb_df_g_small_uncleaned <- rb_df %>%
+  filter(G <= 10)
+
+
+ggplot(rb_df_g_small_uncleaned, aes(x = G, y = APY, color = Player)) +
+  geom_rect(aes(xmin = 0, xmax = quantile(G, .25), ymin = mean(APY), ymax = max(APY)), fill = 'red', alpha=.002, color = 'black', size=.01) +
+  geom_rect(aes(xmin = quantile(G, .75), xmax = max(G), ymin = min(APY), ymax = mean(APY)), fill = 'blue', alpha=.005, color = 'black', size = .01) +
+  geom_point(size = 3, alpha = 0.8) +
+  geom_text(data = subset(rb_df_g_small_uncleaned, APY > 1.5e07),
+            aes(label = Player),
+            size = 4, 
+            hjust = 0.5, vjust = -0.5, 
+            fontface = "bold", 
+            color = "darkblue") +
+  labs(
+    title = "G vs APY",
+    x = "G",
+    y = "Average Per Year (APY)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18, face = "bold"),
+    axis.title = element_text(size = 14),
+    legend.position = "none"  
+  )
+
+
+```
+
+
+
+
+# Checking Predictors
+```{r}
+nrow(rb_df_cleaned)
+rb_practice_model <- randomForest(APY ~ ., data = rb_df_cleaned, ntree = 500,
+                                   importance = TRUE, proximity = TRUE, oob.prox = TRUE)
+rb_practice_model
+round(importance(rb_practice_model), 2)
+varImpPlot(rb_practice_model)
+plot(rb_practice_model)
+
+control <- rfeControl(functions=rfFuncs, method="cv", number=5)
+
+rb_rfe_logapy <- rb_df_cleaned %>%
+  mutate(Log_APY = log(APY)) %>%
+  filter(!is.na(Log_APY), !is.nan(Log_APY), !is.infinite(Log_APY))
+
+results <- rfe(rb_rfe_logapy[, c("Att", "GS", "Att.G", "Total.Yds", "Rec", "Tgt",
+                              "Age",  "Y.G.Rush", "G", "T.G",
+                               "Rec1D", "Rush1D", "Year")],
+              rb_rfe_logapy$Log_APY,
+              sizes = c(1:5),
+              rfeControl = control)
+
+print(results)
+```
+
+# Model
+
+```{r}
+split <- sample.split(rb_df_cleaned$APY, SplitRatio = 0.8)
+train <- subset(rb_df_cleaned, split == TRUE)
+test <- subset(rb_df_cleaned, split == FALSE)
+
+# Notes:
+# Start with around 23 R^2 and 1.04e13 MSE [n = 868]
+# Add filter(G > 11) 25.5/1.02e13 [n = 779]
+# Changed filter to filter(G > 12) 26.5/1.01e13 [n = 726]
+# Changed filter to filter(G > 14) 27.2/1.01e13 [n = 542]
+# Adding Total.Yds Quantiles drops R^2 significantly(negative)
+# Adding Y.G.Rush Quantiles drops R^2 significantly(not as much as Total.Yds) [n = 253]
+# Changing to filter(G > 15) results in 26.36/9.93e12 [n = 408](Did not implement: currently G > 14)
+# Removed Total.Yds > 400 that I had from the beginning. Jumped to 37/7.01e12
+# Changed filter(G>14) to instead removing the outlier
+# CONTINUE: we saw good correlation between APY and players with less than 10 games played but there were some outliers due to injury
+# CONTINUE: broke apart the dataset into less than 10 games played and more than 10 games played and removed based on APY outliers
+# PAST: Thinking whether or not taking the log of the APY in recursive feature
+# selection will help since MSE changes too much for accurate feature selection
+# FINDINGS: G, Tgt, Rec1D, Rec, Total.Yds were the top 5 desired predictors (useless findings?)
+# Inflated APY findings: APY does it better
+# Trial and Errors: G and T.G. are good predictors/Y.G.Rush and Year are good predictors
+# Trial and Errors: Age is a good predictor(Year + Y.G.Rush + Total.Yds + Rec + T.G + G + Age)
+# Trial and Error: Tgt sometimes yields better results (Year + Y.G.Rush + Total.Yds + Rec + T.G + Tgt + G + Age)
+# Made side-by-side plots for different dfs. The final df plots show potential outliers in Age
+# Realized that G<=10 outlier removal removed majority of players(might need to remove outliers per Game units(1G played, 2G played, etc.))
+# PAST: Attempting to remove more outliers in Age and G
+# PAST: Did not work(Total.Yds outliers definitely don't work)
+# CURRENTLY: Avg 46.5 R^2/4.27e12 MSE: APY ~ Year + Y.G.Rush + Total.Yds + Rec + T.G + G + Age + Y.G.Rec + Tgt
+# Problem: No good measurement such as QBR for outlier removal and RB injuries are common
+
+
+
+```
+
+```{r}
+
+rb_model <- randomForest(APY ~ Year + Y.G.Rush + Total.Yds + Rec + T.G + G + Age + Y.G.Rec + Tgt, ntree = 200, mtry = 3, data = train)
+rb_model
+
+
+rb_prediction <- as.vector(predict(rb_model, newdata = test))
+
+prediction_table <- data.frame(
+  Player = test$Player,
+  Year = test$Year,
+  APY = test$APY,
+  Predicted.APY = rb_prediction,
+  Difference = abs(rb_prediction - test$APY)
+)
+
+prediction_table %>% arrange(desc(Predicted.APY))
+```
+
