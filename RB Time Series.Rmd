@@ -1,0 +1,320 @@
+---
+title: "RB Salary Prediction"
+author: "Kotaro Ito"
+date: "2025-04-26"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(warn = -1)
+suppressPackageStartupMessages(library(randomForest))
+library(cowplot)
+library(readxl)
+library(caTools)
+library(randomForest)
+library(Metrics)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+```
+
+# Data Setup
+
+
+```{r}
+rb_salary_csv <- read.csv("./Player Salary RB.csv")
+receiving_data_csv <- read.csv("./1999-2024 Receiving Data (1).csv")
+rushing_data_csv <- read.csv("./1999-2024 Rushing Data.csv")
+
+rb_stats <- full_join(receiving_data_csv, rushing_data_csv, by = c("Player", "Year")) %>%
+  mutate(
+    Total.Yds = coalesce(Yds.x, 0) + coalesce(Yds.y, 0)
+  )
+
+rb_salary_df <- rb_salary_csv %>%
+  mutate(Value = as.numeric(gsub("[$,]", "", Value)),
+         APY = as.numeric(gsub("[$,]", "", APY)),
+         Inflated.APY = as.numeric(gsub("[$,]", "", Inflated.APY))) %>%
+  select(Player, Year.Signed, APY, Inflated.APY)
+
+rb_df <- bind_rows(
+  rb_stats %>%
+    inner_join(rb_salary_df, by = "Player") %>%
+    filter(Year < Year.Signed) %>%
+    group_by(Player, Year) %>%
+    slice_min(Year.Signed, with_ties = FALSE),
+  
+  rb_stats %>%
+    inner_join(rb_salary_df, by = "Player") %>%
+    filter(Year >= Year.Signed) %>%
+    group_by(Player, Year) %>%
+    slice_max(Year.Signed, with_ties = FALSE)
+  ) %>% 
+  ungroup() %>% 
+  distinct(Player, Year, .keep_all = TRUE) %>%
+  filter(Year > 2005) %>%
+  transmute(
+    Player,
+    Age = Age.x,
+    G = G.x, 
+    GS = GS.x, 
+    Year.Signed,
+    APY,
+    Year,
+    Inflated.APY,
+    Rec,
+    Y.G.Rush = Y.G.y,
+    Y.G.Rec = Y.G.x,
+    Tgt,
+    Att,
+    Rec1D = X1D.x,
+    Rush1D = X1D.y,
+    Att.G = A.G,
+    Total.Yds
+  ) %>%
+  mutate(T.G = (Att + Tgt) / G)
+```
+
+# Outlier Removal
+
+```{r}
+ggplot(rb_df, aes(x = Total.Yds, y = APY, color = Player)) +
+  geom_rect(aes(xmin = 0, xmax = quantile(Total.Yds, .25), ymin = mean(APY), ymax = max(APY)), fill = 'red', alpha=.002, color = 'black', size=.01) +
+  geom_rect(aes(xmin = quantile(Total.Yds, .75), xmax = max(Total.Yds), ymin = min(APY), ymax = mean(APY)), fill = 'blue', alpha=.005, color = 'black', size = .01) +
+  geom_point(size = 3, alpha = 0.8) +
+  labs(
+    title = "Total Yards vs APY",
+    x = "Total Yards",
+    y = "Average Per Year (APY)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18, face = "bold"),
+    axis.title = element_text(size = 14),
+    legend.position = "none"  
+  )
+
+
+stats <- c('Age', 'G', 'GS', 'Year', 'Inflated.APY',
+           'Rec', 'Y.G.Rush', 'Tgt', 'Att', 'Rec1D', 'Rush1D', 'Att.G', 'Total.Yds')
+
+#Removing Outliers in Games Played
+rb_df_g_small <- rb_df %>%
+  filter(G > 0, G <= 10)
+
+rb_df_g_other <- rb_df %>%
+   filter(G > 10)
+
+smallg_apy_lower <- quantile(rb_df_g_small$APY, 0.05)
+smallg_apy_upper <- quantile(rb_df_g_small$APY, 0.95)
+
+rb_df_g_small <- rb_df_g_small %>%
+  filter(APY >= smallg_apy_lower, APY <= smallg_apy_upper)
+
+# Combine the two portions
+rb_df_cleaned <- bind_rows(
+  rb_df_g_small, 
+  rb_df_g_other)       
+
+#Side by Side plots for All observations
+df_long <- rb_df %>%
+  pivot_longer(cols = all_of(stats), names_to = "Stat", values_to = "Value")
+ggplot(df_long, aes(x = Value, y = APY)) +
+  geom_point(alpha=0.7) +
+  facet_wrap(~ Stat, scales = "free_x") +
+  theme_minimal() +
+  labs(x = "Stat", y = "APY")
+
+#Side by Side plots for G>10 
+df_long_other <- rb_df_g_other %>%
+  pivot_longer(cols = all_of(stats), names_to = "Stat", values_to = "Value")        
+ggplot(df_long_other, aes(x = Value, y = APY)) +
+  geom_point(alpha=0.7) +
+  facet_wrap(~ Stat, scales = "free_x") +
+  theme_minimal() +
+  labs(x = "Stat", y = "APY")
+
+#Side by Side plots for G<=10(cleaned) 
+df_long_small <- rb_df_g_small %>%
+  pivot_longer(cols = all_of(stats), names_to = "Stat", values_to = "Value")        
+ggplot(df_long_small, aes(x = Value, y = APY)) +
+  geom_point(alpha=0.7) +
+  facet_wrap(~ Stat, scales = "free_x") +
+  theme_minimal() +
+  labs(x = "Stat", y = "APY")
+
+#Side by Side plots for All(Cleaned)
+df_long_cleaned <- rb_df_cleaned %>%
+  pivot_longer(cols = all_of(stats), names_to = "Stat", values_to = "Value")        
+ggplot(df_long_cleaned, aes(x = Value, y = APY)) +
+  geom_point(alpha=0.7) +
+  facet_wrap(~ Stat, scales = "free_x") +
+  theme_minimal() +
+  labs(x = "Stat", y = "APY")
+
+# Outlier Plot for G <= 10
+rb_df_g_small_uncleaned <- rb_df %>%
+  filter(G <= 10)
+```
+
+
+
+
+# Checking Predictors
+```{r}
+library(caret)
+
+rb_practice_model <- randomForest(APY ~ Year + Y.G.Rush + Total.Yds + Rec + T.G + G + Age + Y.G.Rec, data = rb_df_cleaned, ntree = 500,, mtry = 3,
+                                   importance = TRUE, proximity = TRUE, oob.prox = TRUE)
+rb_practice_model
+round(importance(rb_practice_model), 2)
+varImpPlot(rb_practice_model)
+plot(rb_practice_model)
+
+control <- rfeControl(functions=rfFuncs, method="cv", number=5)
+
+rb_rfe_logapy <- rb_df_cleaned %>%
+  mutate(Log_APY = log(APY)) %>%
+  filter(!is.na(Log_APY), !is.nan(Log_APY), !is.infinite(Log_APY))
+
+
+
+results <- rfe(rb_rfe_logapy[, c("Att", "GS", "Att.G", "Total.Yds", "Rec", "Tgt",
+                              "Age",  "Y.G.Rush", "G", "T.G",
+                               "Rec1D", "Rush1D", "Year", "Y.G.Rec")],
+              rb_rfe_logapy$Log_APY,
+              sizes = c(1:6),
+              rfeControl = control)
+
+print(results)
+```
+
+# Model
+
+```{r}
+split <- sample.split(rb_df_cleaned$APY, SplitRatio = 0.8)
+train <- subset(rb_df_cleaned, split == TRUE)
+test <- subset(rb_df_cleaned, split == FALSE)
+```
+
+```{r}
+
+rb_model <- randomForest(APY ~ Year + Y.G.Rush + Total.Yds + Rec + T.G + Y.G.Rec + Age, ntree = 250, mtry = 4, data = train)
+rb_model
+
+
+rb_prediction <- as.vector(predict(rb_model, newdata = test))
+
+prediction_table <- data.frame(
+  Player = test$Player,
+  Year = test$Year,
+  APY = test$APY,
+  Predicted.APY = rb_prediction,
+  Difference = abs(rb_prediction - test$APY)
+)
+
+prediction_table %>% arrange(desc(Predicted.APY))
+```
+
+```{r}
+rb_df_cleaned <- rb_df_cleaned %>%
+  filter(Year.Signed != 0)
+
+market_trend <- Salary_Data %>%
+  group_by(Year.Signed) %>%
+  summarize(Market_APY = mean(APY, na.rm = TRUE))
+
+rb_df_cleaned$Year.Signed <- as.numeric(rb_df_cleaned$Year.Signed)
+rb_df_cleaned$APY <- as.numeric(rb_df_cleaned$APY)  # APY = Average Per Year salary
+
+# Step 3: Aggregate to get average salary per year
+salary_by_year <- rb_df_cleaned %>%
+  group_by(Year.Signed) %>%
+  summarise(avg_salary = mean(APY, na.rm = TRUE))
+
+# Step 4: Fit a linear model
+lm_model <- lm(avg_salary ~ Year.Signed, data = salary_by_year)
+
+# Step 5: Plot with regression line
+ggplot(salary_by_year, aes(x = Year.Signed, y = avg_salary)) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", se = FALSE, color = "red", linewidth = 1) +
+  labs(title = "Average QB Salary Over Time",
+       subtitle = "Linear model of APY by Year Signed",
+       x = "Year Signed",
+       y = "Average Salary (APY)") +
+  theme_minimal()
+```
+
+```{r}
+rb_df_cleaned <- rb_df_cleaned %>%
+  filter(!is.na(APY))
+
+set.seed(1234)
+
+library(forecast)
+
+# Create response time series
+salary_ts <- ts(rb_df_cleaned$APY, start = min(rb_df_cleaned$Year))
+
+
+# Join Market_APY by year
+rb_df_cleaned <- rb_df_cleaned %>%
+  left_join(market_trend, by = "Year.Signed")
+
+
+```
+
+```{r}
+# Create xreg matrix (same row count as salary_ts)
+xreg_matrix <- cbind(
+  RF_Pred = rb_prediction,
+  Market_APY = rb_df_cleaned$Market_APY
+)
+
+
+# Fit the model
+ts_model <- auto.arima(salary_ts, xreg = xreg_matrix)
+summary(ts_model)
+
+```
+```{r}
+fitted_vals <- fitted(ts_model)
+actual_vals <- rb_df_cleaned$APY
+
+# Compute pseudo R²
+rss <- sum((actual_vals - fitted_vals)^2)
+tss <- sum((actual_vals - mean(actual_vals))^2)
+rsq <- 1 - rss/tss
+rsq
+```
+```{r}
+
+last_market_apy <- tail(rb_df_cleaned$Market_APY, 1)
+
+
+n_future_years <- 5
+growth_rate <- 0.03  # 3% per year
+
+
+future_market_apy <- last_market_apy * (1 + growth_rate)^(1:n_future_years)
+
+
+future_rf_pred <- rep(7000000, n_future_years)  # assume constant RF_Pred
+
+
+future_xreg <- cbind(
+  RF_Pred = future_rf_pred,
+  Market_APY = future_market_apy
+)
+
+
+future_forecast <- forecast(ts_model, xreg = future_xreg)
+
+
+print(future_forecast)
+autoplot(future_forecast)
+```
+
+
