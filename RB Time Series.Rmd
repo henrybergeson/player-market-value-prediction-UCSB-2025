@@ -24,7 +24,7 @@ library(ggplot2)
 
 ```{r}
 rb_salary_csv <- read.csv("./Player Salary RB.csv")
-receiving_data_csv <- read.csv("./1999-2024 Receiving Data (1).csv")
+receiving_data_csv <- read.csv("./1999-2024 Receiving Data.csv")
 rushing_data_csv <- read.csv("./1999-2024 Rushing Data.csv")
 
 rb_stats <- full_join(receiving_data_csv, rushing_data_csv, by = c("Player", "Year")) %>%
@@ -115,7 +115,7 @@ rb_df_g_small <- rb_df_g_small %>%
 # Combine the two portions
 rb_df_cleaned <- bind_rows(
   rb_df_g_small, 
-  rb_df_g_other)       
+  rb_df_g_other)
 
 #Side by Side plots for All observations
 df_long <- rb_df %>%
@@ -214,7 +214,25 @@ prediction_table <- data.frame(
   Difference = abs(rb_prediction - test$APY)
 )
 
+prediction_table %>% arrange(desc(Predicted.APY)) %>% filter(Year == 2024)
+```
+
+```{r}
+rb_prediction <- as.vector(predict(rb_model, newdata = rb_df_cleaned))
+
+prediction_table <- data.frame(
+  Player = rb_df_cleaned$Player,
+  Year = rb_df_cleaned$Year,
+  APY = rb_df_cleaned$APY,
+  Predicted.APY = rb_prediction,
+  Difference = abs(rb_prediction - rb_df_cleaned$APY)
+)
+
 prediction_table %>% arrange(desc(Predicted.APY))
+```
+
+```{r}
+saveRDS(rb_model, "./web/data/RB_RF.rds")
 ```
 
 ```{r}
@@ -273,11 +291,27 @@ xreg_matrix <- cbind(
   Market_APY = rb_df_cleaned$Market_APY
 )
 
-
 # Fit the model
 ts_model <- auto.arima(salary_ts, xreg = xreg_matrix)
 summary(ts_model)
+```
 
+```{r}
+future_forecast <- forecast(ts_model, xreg = xreg_matrix)
+predicted_salary_ts <- as.numeric(future_forecast$mean)
+
+# Make results table for test set
+res_ts <- data.frame(
+  Name = rb_df_cleaned$Player,
+  Year = rb_df_cleaned$Year,
+  Salary = rb_df_cleaned$APY,
+  Predicted_Salary = predicted_salary_ts,
+  Diff = predicted_salary_ts - rb_df_cleaned$APY,
+  PDiff = predicted_salary_ts / rb_df_cleaned$APY
+)
+
+# View sorted by Predicted Salary
+res_ts %>% arrange(desc(Predicted_Salary))
 ```
 ```{r}
 fitted_vals <- fitted(ts_model)
@@ -289,6 +323,7 @@ tss <- sum((actual_vals - mean(actual_vals))^2)
 rsq <- 1 - rss/tss
 rsq
 ```
+
 ```{r}
 
 last_market_apy <- tail(rb_df_cleaned$Market_APY, 1)

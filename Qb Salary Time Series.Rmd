@@ -9,10 +9,11 @@ Packages and Data Import
 # Packages, install if necessary
 library(dplyr)
 library(ggplot2)
+library(randomForest)
 
 # Straight from github repo, assumes all files in same directory
-Salary_Data <- read.csv("./Player Salary QB (1).csv")
-Passing_Data <- read.csv("./1999-2024 Passing Data (2).csv")
+Salary_Data <- read.csv("Player Salary QB.csv")
+Passing_Data <- read.csv("1999-2024 Passing Data.csv")
 ```
 
 ```{r}
@@ -120,8 +121,9 @@ plot(span_model)
 ```
 
 ```{r}
+set.seed(12345)
 QB_Salary_predictor_rf <- randomForest(
-  formula = APY ~ Rate + QBR + Cmp. + Year,
+  formula = APY ~ Rate + QBR + Cmp. + TD + Yds + Year,
   data = model_dataset,
   ntree = 200,
   mtry = 3
@@ -215,6 +217,11 @@ summary(ts_model)
 ts_model
 ```
 ```{r}
+saveRDS(ts_model, './web/data/QB_TS.rds')
+```
+
+
+```{r}
 train_idx <- QB_Data$Year.Signed <= 2018
 test_idx <- !train_idx
 
@@ -268,8 +275,7 @@ future_rf_pred <- rep(7000000, n_future_years)  # assume constant RF_Pred
 
 
 future_xreg <- cbind(
-  RF_Pred = base_predictions,
-  Market_APY = future_market_apy
+  RF_Pred = future_rf_pred
 )
 
 

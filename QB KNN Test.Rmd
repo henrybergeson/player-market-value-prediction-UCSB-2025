@@ -1,0 +1,98 @@
+---
+title: "New QB Salary Predictions"
+output: html_document
+date: "2025-04-22"
+---
+
+Packages and Data Import
+```{r}
+# Packages, install if necessary
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(caret)
+library(kknn)
+
+# Straight from github repo, assumes all files in same directory
+Salary_Data <- read.csv("./Player Salary QB.csv")
+Passing_Data <- read.csv("./1999-2024 Passing Data.csv")
+```
+
+
+```{r}
+Salary_Data <- Salary_Data %>% 
+  mutate(
+    Value = as.numeric(gsub("[$,]", "", Value)),
+    APY = as.numeric(gsub("[$,]", "", APY)),
+    Guaranteed = as.numeric(gsub("[$,]", "", Guaranteed)),
+) %>% select(X, Player, Year.Signed, Years, Value, APY, Guaranteed, APY.as...Of.Cap.At.Signing) %>%
+  filter(Year.Signed > 2000) %>% distinct() %>% mutate(Year.End = Year.Signed + Years)
+
+QB_Data <- bind_rows(
+  Passing_Data %>%
+    inner_join(Salary_Data, by = "Player") %>%
+    filter(Year < Year.Signed) %>%
+    group_by(Player, Year) %>%
+    slice_min(Year.Signed, with_ties = FALSE),
+  
+  Passing_Data %>%
+    inner_join(Salary_Data, by = "Player") %>%
+    filter(Year >= Year.Signed) %>%
+    group_by(Player, Year) %>%
+    slice_max(Year.Signed, with_ties = FALSE)
+  ) %>% ungroup() %>% distinct(Player, Year, .keep_all = TRUE) %>%
+  filter(Year > 2005) %>%
+  filter(!is.na(QBR)) %>%
+  filter(Att > 200)
+
+# Phillip Rivers for one season in particular does not have an Success rate for some fucking reason
+QB_Data[is.na(QB_Data)] <- 0
+
+nrow(QB_Data)
+```
+
+```{r}
+set.seed(12345)
+train_index <- sample(1:nrow(model_dataset), 0.8 * nrow(model_dataset))
+train_data <- model_dataset[train_index, ]
+test_data <- model_dataset[-train_index, ]
+
+knn_model <- kknn::train.kknn(APY ~ QBR + Rate + Cmp. + Y.G + Year, data = model_dataset, kmax = 14)
+knn_pred <- predict(knn_model, newdata=model_dataset)
+
+mean((knn_pred - model_dataset$APY)^2)
+caret::R2(knn_pred, model_dataset$APY)
+```
+
+```{r}
+k_values <- 1:50
+mse_values <- numeric(length(k_values))
+
+for (k in k_values) {
+  knn_model <- train.kknn(APY ~ QBR + Rate + Cmp. + Y.G + Year, data = train_data, kmax = k)
+  knn_pred <- predict(knn_model, newdata = test_data)
+  mse_values[k] <- mean((knn_pred - test_data$APY)^2)
+}
+
+plot(k_values, mse_values, type = "b", pch = 19, col = "blue", 
+     xlab = "k", ylab = "Mean Squared Error (MSE)")
+
+which.min(mse_values)
+```
+
+Prediction eyetest
+```{r}
+named_testers <- test_data %>% 
+  left_join(QB_Data %>% select(Player, Yds, `Cmp.`, Year), by = c("Yds", "Cmp.", "Year"))
+knn_pred_df <- data.frame(
+  
+  Name = named_testers$Player,
+  Year = named_testers$Year,
+  Salary = named_testers$APY,
+  Predicted_Salary = knn_pred,
+  Diff = knn_pred - named_testers$APY,
+  PDiff = knn_pred / named_testers$APY
+)
+
+knn_pred_df %>% arrange(desc(Predicted_Salary))
+```

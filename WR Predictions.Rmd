@@ -17,7 +17,7 @@ library(ggrepel)
 library(randomForest)
 
 # Straight from github repo, assumes all files in same directory
-Salary_Data <- read.csv("/Users/henrybergeson/Documents/NFLPlayerData/Player Salary WR.csv")
+Salary_Data <- read.csv("Player Salary WR.csv")
 Receiving_Data <- read.csv("/Users/henrybergeson/Downloads/1999-2024 Receiving Data.csv")
 ```
 
@@ -166,6 +166,10 @@ res <- data.frame(
 )
 
 res %>% arrange(desc(Predicted_Salary))
+```
+
+```{r}
+saveRDS(WR_Salary_predictor_rf, "./web/data/WR_RF.rds")
 ```
 
 ```{r}

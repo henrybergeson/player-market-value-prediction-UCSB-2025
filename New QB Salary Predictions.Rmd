@@ -23,8 +23,9 @@ Salary_Data <- Salary_Data %>%
   mutate(
     Value = as.numeric(gsub("[$,]", "", Value)),
     APY = as.numeric(gsub("[$,]", "", APY)),
+    Inflated.APY = as.numeric(gsub("[$,]", "", Inflated.APY)),
     Guaranteed = as.numeric(gsub("[$,]", "", Guaranteed)),
-) %>% select(X, Player, Year.Signed, Years, Value, APY, Guaranteed, APY.as...Of.Cap.At.Signing) %>%
+) %>% transmute(Player, Year.Signed, Years, Total.Contract = Value, APY, Inflated.APY) %>%
   filter(Year.Signed > 2000) %>% distinct() %>% mutate(Year.End = Year.Signed + Years)
 
 QB_Data <- bind_rows(
@@ -72,7 +73,7 @@ ggplot(QB_Data, aes(QBR, APY, color=Player)) + geom_point() +
 
 ```{r}
 ggplot(QB_Data) +
-  geom_rect(aes(xmin = 0, xmax = quantile(QBR, .25), ymin = mean(APY), ymax = max(APY)), fill = 'lightcoral', alpha=.002, color = 'black', size=.01) +
+  geom_rect(aes(xmin = min(QBR), xmax = quantile(QBR, .25), ymin = mean(APY), ymax = max(APY)), fill = 'lightcoral', alpha=.002, color = 'black', size=.01) +
   geom_rect(aes(xmin = quantile(QBR, .75), xmax = max(QBR), ymin = min(APY), ymax = mean(APY)), fill = 'skyblue', alpha=.005, color = 'black', size = .01) +
   annotate("text", 
          x = mean(c(0, quantile(QB_Data$QBR, .25))), 
@@ -92,23 +93,69 @@ ggplot(QB_Data) +
     y = "Average Salary"
   ) +
   theme(legend.position = "none")
+
+ggplot(QB_Data) +
+  geom_rect(aes(xmin = min(QBR), xmax = quantile(QBR, .25), ymin = mean(Inflated.APY), ymax = max(Inflated.APY)), fill = 'lightcoral', alpha=.002, color = 'black', size=.01) +
+  geom_rect(aes(xmin = quantile(QBR, .75), xmax = max(QBR), ymin = min(Inflated.APY), ymax = mean(Inflated.APY)), fill = 'skyblue', alpha=.005, color = 'black', size = .01) +
+  annotate("text", 
+         x = mean(c(0, quantile(QB_Data$QBR, .25))), 
+         y = max(QB_Data$Inflated.APY), 
+         label = "Underperformers", 
+         hjust = 0.5, vjust = -0.5,
+         fontface = "bold", size = 3.5, color = "darkred") +
+  annotate("text", 
+         x = mean(c(quantile(QB_Data$QBR, .875), max(QB_Data$QBR))), 
+         y = min(QB_Data$Inflated.APY), 
+         label = "Overperformers", 
+         hjust = 0.5, vjust = 1.5,
+         fontface = "bold", size = 3.5, color = "darkblue") + 
+  geom_point(aes(QBR, Inflated.APY, fill=Player),shape = 21, size = 1.75, color = "black", stroke = 0.4) +
+  labs(
+    title = "QBR vs Inflated Average Salary, Overperformers and Underperformers labeled",
+    y = "Average Salary"
+  ) +
+  theme(legend.position = "none")
+
+ggplot(QB_Data) +
+  geom_rect(aes(xmin = min(Rate), xmax = quantile(Rate, .25), ymin = mean(APY), ymax = max(APY)), fill = 'lightcoral', alpha=.002, color = 'black', size=.01) +
+  geom_rect(aes(xmin = quantile(Rate, .75), xmax = max(Rate), ymin = min(APY), ymax = mean(APY)), fill = 'skyblue', alpha=.005, color = 'black', size = .01) +
+  annotate("text", 
+         x = mean(c(min(QB_Data$Rate), quantile(QB_Data$Rate, .25))), 
+         y = max(QB_Data$APY), 
+         label = "Underperformers", 
+         hjust = 0.5, vjust = -0.5,
+         fontface = "bold", size = 3.5, color = "darkred") +
+  annotate("text", 
+         x = mean(c(quantile(QB_Data$Rate, .875), max(QB_Data$Rate))), 
+         y = min(QB_Data$APY), 
+         label = "Overperformers", 
+         hjust = 0.5, vjust = 1.5,
+         fontface = "bold", size = 3.5, color = "darkblue") + 
+  geom_point(aes(Rate, APY, fill=Player),shape = 21, size = 1.75, color = "black", stroke = 0.4) +
+  labs(
+    title = "Passer Rating vs Average Salary",
+    subtitle = "Overperformers/Underperformers Highlighted",
+    y = "Average Salary/Year"
+  ) +
+  theme(legend.position = "none")
 ```
 
 
-RF MODEL TRAINING
-- We don't really care about those first 4 variables on the importance plot bc of sex
+RF MODEL TRAINING ON SALARY
+- We don't really care about those first 4 variables on the importance plot bc of salary 
 ```{r}
 QBR_q1 <- quantile(QB_Data$QBR , .25)
 QBR_q3 <- quantile(QB_Data$QBR , .75)
 Rtg_q1 <- quantile(QB_Data$Rate, .25)
 Rtg_q3 <- quantile(QB_Data$Rate, .75)
+meanApy <- mean(QB_Data$APY)
 
-possible_predictors <- QB_Data[,c(2,5:6,8:31, 33:39)]# Extract columns we wanna use
+possible_predictors <- QB_Data[,c(2,5:6,8:31,33,37)]# Extract columns we wanna use
 model_dataset <- possible_predictors %>%
-  filter(QBR < QBR_q3 | APY > 2e+07) %>%
-  filter(QBR > QBR_q1 | APY < 2e+07) %>%
-  filter(Rate < Rtg_q3 | APY > 2e+07) %>%
-  filter(Rate > Rtg_q1 | APY < 2e+07)
+  filter(QBR < QBR_q3 | APY > meanApy) %>%
+  filter(QBR > QBR_q1 | APY < meanApy) %>%
+  filter(Rate < Rtg_q3 | APY > meanApy) %>%
+  filter(Rate > Rtg_q1 | APY < meanApy)
 
 set.seed(12345)
 span_model <- randomForest(
@@ -125,14 +172,16 @@ plot(span_model)
 ```
 
 ```{r}
+set.seed(12345)
 QB_Salary_predictor_rf <- randomForest(
-  formula = APY ~ Rate + QBR + Cmp. + Year,
+  formula = APY ~ Rate + QBR + Cmp. + TD + Yds + Year,
   data = model_dataset,
   ntree = 200,
   mtry = 3
 )
 
 QB_Salary_predictor_rf$rsq[200]
+sqrt(QB_Salary_predictor_rf$mse[200])
 ```
 
 ```{r}
@@ -149,8 +198,188 @@ res <- data.frame(
 res %>% arrange(desc(Predicted_Salary))
 ```
 
+Year ignorant predictions
 ```{r}
-ggplot(QB_Data %>% filter(Player == "Aaron Rodgers"), aes(x = Year)) + 
-  geom_line(aes(y = QBR * max(QB_Data$APY) / max(QB_Data$QBR), color = "QBR")) +
+year_ignorant_predictions <- as.vector(predict(QB_Salary_predictor_rf, newdata = QB_Data %>% mutate(Year = 2025)))
+
+res <- data.frame(
+  Name = QB_Data$Player,
+  Year = QB_Data$Year,
+  Salary = QB_Data$APY,
+  Predicted_Salary = year_ignorant_predictions,
+  Diff = year_ignorant_predictions - QB_Data$APY,
+  PDiff = year_ignorant_predictions / QB_Data$APY
+)
+
+res %>% arrange(desc(Year)) %>% filter(Name == "Joe Flacco")
+```
+
+```{r}
+ggplot(QB_Data %>% filter(Player == "Andy Dalton"), aes(x = Year)) + 
+  geom_line(aes(y = Rate * max(QB_Data$APY) / max(QB_Data$Rate), color = "Rate")) +
+  geom_line(aes(y = APY, color = "APY"))
+```
+```{r}
+library(rpart)
+library(rpart.plot)
+tree_model <- rpart(APY ~ Rate + QBR + Cmp., data = model_dataset)
+
+# Plot the tree
+rpart.plot(tree_model, extra = 1, under = TRUE, box.palette = "RdBu")
+```
+
+DOWNLOAD MODEL
+```{r}
+saveRDS(QB_Salary_predictor_rf, file="QB_RF.rds")
+```
+
+
+# Everything below here is garbage, speculation trying to get a better model.
+
+NOW WITH INFLATED SALARY
+```{r}
+meanInfApy <- mean(QB_Data$Inflated.APY)
+
+possible_predictors <- QB_Data[,c(2,5:6,8:31,33,38)]# Extract columns we wanna use
+model_dataset <- possible_predictors %>%
+  filter(QBR < QBR_q3 | Inflated.APY > meanInfApy) %>%
+  filter(QBR > QBR_q1 | Inflated.APY < meanInfApy) %>%
+  filter(Rate < Rtg_q3 | Inflated.APY > meanInfApy) %>%
+  filter(Rate > Rtg_q1 | Inflated.APY < meanInfApy)
+
+set.seed(12345)
+span_model <- randomForest(
+  formula = Inflated.APY ~ .,
+  data = model_dataset,
+  ntree = 1000,
+  mtry = 4
+)
+
+nrow(model_dataset)
+varImpPlot(span_model)
+apply(importance(span_model), 2, function(x) sort(x, decreasing=TRUE))
+plot(span_model)
+```
+
+```{r}
+set.seed(12345)
+QB_Salary_predictor_rf <- randomForest(
+  formula = Inflated.APY ~ Rate + QBR + Cmp. + TD + Yds,
+  data = model_dataset,
+  ntree = 200,
+  mtry = 3
+)
+
+QB_Salary_predictor_rf$rsq[200]
+sqrt(QB_Salary_predictor_rf$mse[200])
+```
+
+```{r}
+base_predictions <- as.vector(predict(QB_Salary_predictor_rf, newdata = QB_Data))
+res <- data.frame(
+  Name = QB_Data$Player,
+  Year = QB_Data$Year,
+  Salary = QB_Data$Inflated.APY,
+  Predicted_Salary = base_predictions,
+  Diff = base_predictions - QB_Data$Inflated.APY,
+  PDiff = base_predictions / QB_Data$Inflated.APY
+)
+
+res %>% arrange(desc(Predicted_Salary))
+```
+
+Okay hear me out
+Manual inflation factor
+```{r}
+QB_Data_Nsal <- QB_Data
+for(year in unique(QB_Data$Year)) {
+  scale_factor <- max(QB_Data$APY)/max((QB_Data %>% filter(Year == year))$APY)
+  QB_Data_Nsal <- QB_Data_Nsal %>% mutate(APY = ifelse(Year == year, APY * scale_factor, APY))
+}
+
+QB_Data_Nsal %>% select(Player, Year, APY) %>% filter(Year == 2015) %>% arrange(desc(APY))
+```
+```{r}
+ggplot(QB_Data_Nsal) +
+  geom_rect(aes(xmin = min(QBR), xmax = quantile(QBR, .25), ymin = mean(APY), ymax = max(APY)), fill = 'lightcoral', alpha=.002, color = 'black', size=.01) +
+  geom_rect(aes(xmin = quantile(QBR, .75), xmax = max(QBR), ymin = min(APY), ymax = mean(APY)), fill = 'skyblue', alpha=.005, color = 'black', size = .01) +
+  annotate("text", 
+         x = mean(c(0, quantile(QB_Data$QBR, .25))), 
+         y = max(QB_Data$APY), 
+         label = "Underperformers", 
+         hjust = 0.5, vjust = -0.5,
+         fontface = "bold", size = 3.5, color = "darkred") +
+  annotate("text", 
+         x = mean(c(quantile(QB_Data$QBR, .875), max(QB_Data$QBR))), 
+         y = min(QB_Data$APY), 
+         label = "Overperformers", 
+         hjust = 0.5, vjust = 1.5,
+         fontface = "bold", size = 3.5, color = "darkblue") + 
+  geom_point(aes(QBR, APY, fill=Player),shape = 21, size = 1.75, color = "black", stroke = 0.4) +
+  labs(
+    title = "QBR vs Normalized Average Salary, Overperformers and Underperformers labeled",
+    y = "Average Salary"
+  ) +
+  theme(legend.position = "none")
+```
+
+```{r}
+QBR_q1 <- quantile(QB_Data_Nsal$QBR , .25)
+QBR_q3 <- quantile(QB_Data_Nsal$QBR , .75)
+Rtg_q1 <- quantile(QB_Data_Nsal$Rate, .25)
+Rtg_q3 <- quantile(QB_Data_Nsal$Rate, .75)
+meanApy <- mean(QB_Data_Nsal$APY)
+
+possible_predictors <- QB_Data_Nsal[,c(2,5:6,8:31,33,37)]# Extract columns we wanna use
+model_dataset <- possible_predictors %>%
+  filter(QBR < QBR_q3 | APY > meanApy) %>%
+  filter(QBR > QBR_q1 | APY < meanApy) %>%
+  filter(Rate < Rtg_q3 | APY > meanApy) %>%
+  filter(Rate > Rtg_q1 | APY < meanApy)
+
+set.seed(12345)
+span_model <- randomForest(
+  formula = APY ~ .,
+  data = model_dataset,
+  ntree = 1000,
+  mtry = 4
+)
+
+nrow(model_dataset)
+varImpPlot(span_model)
+apply(importance(span_model), 2, function(x) sort(x, decreasing=TRUE))
+plot(span_model)
+```
+
+```{r}
+set.seed(12345)
+QB_Salary_predictor_rf <- randomForest(
+  formula = APY ~ Rate + QBR + TD + Y.G + Cmp,
+  data = model_dataset,
+  ntree = 200,
+  mtry = 3
+)
+
+QB_Salary_predictor_rf$rsq[200]
+sqrt(QB_Salary_predictor_rf$mse[200])
+```
+
+```{r}
+base_predictions <- as.vector(predict(QB_Salary_predictor_rf, newdata = QB_Data_Nsal))
+res <- data.frame(
+  Name = QB_Data_Nsal$Player,
+  Year = QB_Data_Nsal$Year,
+  Salary = QB_Data_Nsal$APY,
+  Predicted_Salary = base_predictions,
+  Diff = base_predictions - QB_Data_Nsal$APY,
+  PDiff = base_predictions / QB_Data_Nsal$APY
+)
+
+res %>% arrange(desc(Predicted_Salary))
+```
+
+```{r}
+ggplot(QB_Data %>% filter(Player == "Andy Dalton"), aes(x = Year)) + 
+  geom_line(aes(y = Rate * max(QB_Data$APY) / max(QB_Data$Rate), color = "Rate")) +
   geom_line(aes(y = APY, color = "APY"))
 ```

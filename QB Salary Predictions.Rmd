@@ -188,7 +188,7 @@ Rtg_q1 <- quantile(QB_Data$Rate, .25)
 Rtg_q3 <- quantile(QB_Data$Rate, .75)
 
 
-possible_predictors <- QB_Data[,c(3, 6, 7, 9:18, 20:32, 35:41)]# Extract columns we wanna use
+possible_predictors <- QB_Data[,c(3, 6, 7, 9:18, 20:32, 35:41)] # Extract columns we wanna use
 model_dataset <- possible_predictors %>%
   filter(G > 8) %>%
   filter(QBR < QBR_q3 | Average.Salary > 2e+07) %>%

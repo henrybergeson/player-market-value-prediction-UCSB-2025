@@ -18,7 +18,7 @@ library(randomForest)
 
 # Straight from github repo, assumes all files in same directory
 Salary_Data <- read.csv("./Player Salary WR.csv")
-Receiving_Data <- read.csv("./1999-2024 Receiving Data (1).csv")
+Receiving_Data <- read.csv("./1999-2024 Receiving Data.csv")
 ```
 
 

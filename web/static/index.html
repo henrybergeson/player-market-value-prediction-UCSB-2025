@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GridPredict</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="script.js"></script>
+</head>
+<body>
+    <h1 class="title">Welcome to GridPredict: the NFL Free Agent Value Predictor!</h1>
+    <p class="description">Our model predicts the market value of NFL offensive players based on performance statistical data.</p>
+    <p class="description"></p>
+    <p class="description">How To Use:</p>
+
+    <li class="description">Select the position of player</li>
+    <li class="description">Enter in Statistics of your choosing</li>
+    <li class="description">Click the "Predict" button</li>
+
+    <!-- Common inputs that always show -->
+    <div class="common-inputs">
+        <div class="input-container">
+            <label for="positionSelect">Select Player Position:</label>
+            <select id="positionSelect">
+                <option value="QB">Quarterback</option>
+                <option value="RB">Running Back</option>
+                <option value="WR">Wide Receiver</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Position specific stats -->
+<!-- QB Input Section -->
+<div id="qbStats" class="stats-container" style="display: none;">
+    <h3>Quarterback Stats</h3>
+    <div class="input-container">
+        <label for="Rate">Rate:</label>
+        <input type="number" id="Rate">
+    </div>
+    <div class="input-container">
+        <label for="QBR">Quarterback Rating (QBR):</label>
+        <input type="number" id="QBR">
+    </div>
+    <div class="input-container">
+        <label for="Cmp">Completions:</label>
+        <input type="number" id="Cmp">
+    </div>
+    <div class="input-container">
+        <label for="TD">Touchdowns (TD):</label>
+        <input type="number" id="TD">
+    </div>
+    <div class="input-container">
+        <label for="Yds">Total Yards:</label>
+        <input type="number" id="Yds">
+    </div>
+</div>
+
+<!-- RB Input Section -->
+<div id="rbStats" class="stats-container" style="display: none;">
+    <h3>Running Back Stats</h3>
+    <div class="input-container">
+        <label for="Y.G.Rush">Rushing Yards per Game:</label>
+        <input type="number" id="Y.G.Rush">
+    </div>
+    <div class="input-container">
+        <label for="Y.G.Rec">Receiving Yards per Game:</label>
+        <input type="number" id="Y.G.Rec">
+    </div>
+    <div class="input-container">
+        <label for="Total.Yds">Total Yards:</label>
+        <input type="number" id="Total.Yds">
+    </div>
+    <div class="input-container">
+        <label for="T.G">Touches per Game (T.G):</label>
+        <input type="number" id="T.G">
+    </div>
+    <div class="input-container">
+        <label for="Rec">Receptions:</label>
+        <input type="number" id="Rec">
+    </div>
+    <div class="input-container">
+        <label for="Age">Age:</label>
+        <input type="number" id="Age">
+    </div>
+</div>
+
+<!-- WR Input Section -->
+<div id="wrStats" class="stats-container" style="display: none;">
+    <h3>Wide Receiver Stats</h3>
+    <div class="input-container">
+        <label for="R.G">Receptions per Game (R.G):</label>
+        <input type="number" id="R.G">
+    </div>
+    <div class="input-container">
+        <label for="Y.G">Yards per Game (Y.G):</label>
+        <input type="number" id="Y.G">
+    </div>
+    <div class="input-container">
+        <label for="TD">Touchdowns (TD):</label>
+        <input type="number" id="TD">
+    </div>
+</div>
+
+
+    <!-- Move predict button to the bottom -->
+    <div class="button-container">
+        <button id="predictButton">Predict</button>
+    </div>
+    
+    <div id="predictionResult" style="margin-top: 20px; font-weight: bold;"></div>
+</body>
+</html>
