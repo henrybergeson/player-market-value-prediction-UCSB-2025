@@ -1,0 +1,266 @@
+---
+title: "WR Predictions"
+author: "Henry Bergeson"
+date: "2025-04-24"
+output: html_document
+---
+
+```{r}
+# Packages, install if necessary
+
+#install.packages("dplyr", repos = "https://cloud.r-project.org/")
+#install.packages("ggplot2", repos = "https://cloud.r-project.org/")
+#install.packages("ggrepel", repos = "https://cloud.r-project.org/")
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(randomForest)
+
+# Straight from github repo, assumes all files in same directory
+Salary_Data <- read.csv("./Player Salary WR.csv")
+Receiving_Data <- read.csv("./1999-2024 Receiving Data (1).csv")
+```
+
+
+```{r}
+Salary_Data <- Salary_Data %>% 
+  mutate(
+    Value = as.numeric(gsub("[$,]", "", Value)),
+    APY = as.numeric(gsub("[$,]", "", APY)),
+    Guaranteed = as.numeric(gsub("[$,]", "", Guaranteed)),
+) %>% select(X, Player, Year.Signed, Years, Value, APY, Guaranteed, APY.as...Of.Cap.At.Signing) %>%
+  filter(Year.Signed > 2000) %>% distinct() %>% mutate(Year.End = Year.Signed + Years)
+
+Wr_Data <- bind_rows(
+  Receiving_Data %>%
+    inner_join(Salary_Data, by = "Player") %>%
+    filter(Year < Year.Signed) %>%
+    group_by(Player, Year) %>%
+    slice_min(Year.Signed, with_ties = FALSE),
+
+
+  Receiving_Data %>%
+    inner_join(Salary_Data, by = "Player") %>%
+    filter(Year >= Year.Signed) %>%
+    group_by(Player, Year) %>%
+    slice_max(Year.Signed, with_ties = FALSE)
+  ) %>% ungroup() %>% distinct(Player, Year, .keep_all = TRUE) %>%
+  filter(Year > 2005) %>%
+  filter(!is.na(`Y.G`)) %>%
+  filter(Yds > 200)
+
+# Phillip Rivers for one season in particular does not have an Success rate for some fucking reason
+Wr_Data[is.na(Wr_Data)] <- 0
+
+nrow(Wr_Data)
+```
+
+```{r}
+ggplot(Salary_Data, aes(x=Year.Signed, y=APY)) + geom_point() 
+```
+
+```{r}
+
+Yard_Per_Game <- Wr_Data$'Y.G'
+
+summary(Wr_Data$`Y.G`)
+str    (Wr_Data$`Y.G`)
+
+Wr_Data <- Wr_Data %>%
+  mutate(
+    Label = ifelse(
+      (Yard_Per_Game > quantile(Yard_Per_Game, 0.75) & APY < mean(APY)) |
+      (Yard_Per_Game < quantile(Yard_Per_Game, 0.25) & APY > mean(APY)),
+      paste(gsub("[^A-Z]+", ".", Player), sub("20", "", Year)),
+      NA
+    ),
+    Label = as.character(Label)  # ensure it's character
+  )
+
+# Plot
+ggplot(Wr_Data, aes(x = Yard_Per_Game, y = APY, color = Player)) +
+  geom_point() +
+  geom_text_repel(aes(label = Label), na.rm = TRUE) +
+  labs(
+    title = "Y/G vs Average Salary, Overperformers and Underperformers labeled",
+    y = "Average Salary",
+    x = "Yards Per Game"
+  ) +
+  theme(legend.position = "none")
+```
+
+```{r}
+ggplot(Wr_Data) +
+  geom_rect(aes(xmin = 0, xmax = quantile(Yard_Per_Game, .25), ymin = mean(APY), ymax = max(APY)), fill = 'lightcoral', alpha=.002, color = 'black', size=.01) +
+  geom_rect(aes(xmin = quantile(Yard_Per_Game, .75), xmax = max(Yard_Per_Game), ymin = min(APY), ymax = mean(APY)), fill = 'skyblue', alpha=.005, color = 'black', size = .01) +
+  annotate("text", 
+         x = mean(c(0, quantile(Wr_Data$Y.G, .25))), 
+         y = max(Wr_Data$APY), 
+         label = "Underperformers", 
+         hjust = 0.5, vjust = -0.5,
+         fontface = "bold", size = 3.5, color = "darkred") +
+  annotate("text", 
+         x = mean(c(quantile(Wr_Data$'Y.G', .875), max(Wr_Data$'Y.G'))), 
+         y = min(Wr_Data$APY), 
+         label = "Overperformers", 
+         hjust = 0.5, vjust = 1.5,
+         fontface = "bold", size = 3.5, color = "darkblue") + 
+  geom_point(aes(Yard_Per_Game, APY, fill=Player),shape = 21, size = 1.75, color = "black", stroke = 0.4) +
+  labs(
+    title = "Yards Per Game vs Average Salary, Overperformers and Underperformers labeled",
+    y = "Average Salary"
+  ) +
+  theme(legend.position = "none")
+```
+
+
+RF MODEL TRAINING
+- We don't really care about those first 4 variables on the importance plot bc of sex
+```{r}
+Y.G_q1 <- quantile(Wr_Data$'Y.G' , .25)
+Y.G_q3 <- quantile(Wr_Data$'Y.G' , .75)
+R.G_q1 <- quantile(Wr_Data$'R.G', .25)
+R.G_q3 <- quantile(Wr_Data$'R.G', .75)
+
+possible_predictors <- Wr_Data[,c(2,5:8:29)]# Extract columns we wanna use
+model_dataset <- possible_predictors %>%
+  filter(Y.G < Y.G_q3 | APY > 2e+07) %>%
+  filter(Y.G > Y.G_q1 | APY < 2e+07) %>%
+  filter(R.G < R.G_q3 | APY > 2e+07) %>%
+  filter(R.G > R.G_q1 | APY < 2e+07)
+colSums(is.na(Wr_Data))
+set.seed(12345)
+span_model <- randomForest(
+  formula = APY ~ .,
+  data = model_dataset,
+  ntree = 1000,
+  mtry = 4
+)
+
+nrow(model_dataset)
+varImpPlot(span_model)
+apply(importance(span_model), 2, function(x) sort(x, decreasing=TRUE))
+plot(span_model)
+```
+
+```{r}
+WR_Salary_predictor_rf <- randomForest(
+  formula = APY ~ R.G + Y.G + TD + Year,
+  data = model_dataset,
+  ntree = 200,
+  mtry = 3
+)
+
+WR_Salary_predictor_rf$rsq[200]
+```
+
+```{r}
+base_predictions <- as.vector(predict(WR_Salary_predictor_rf, newdata = Wr_Data))
+res <- data.frame(
+  Name = Wr_Data$Player,
+  Year = Wr_Data$Year,
+  Salary = Wr_Data$APY,
+  Predicted_Salary = base_predictions,
+  Diff = base_predictions - Wr_Data$APY,
+  PDiff = base_predictions / Wr_Data$APY
+)
+
+res %>% arrange(desc(Predicted_Salary))
+```
+
+```{r}
+ggplot(Wr_Data %>% filter(Player == "Puka Nacua"), aes(x = Year)) + 
+  geom_line(aes(y = Y.G * max(Wr_Data$APY) / max(Wr_Data$Y.G), color = "Y.G")) +
+  geom_line(aes(y = APY, color = "APY"))
+```
+
+
+```{r}
+market_trend <- Salary_Data %>%
+  group_by(Year.Signed) %>%
+  summarize(Market_APY = mean(APY, na.rm = TRUE))
+
+Wr_Data$Year.Signed <- as.numeric(Wr_Data$Year.Signed)
+Wr_Data$APY <- as.numeric(Wr_Data$APY)  # APY = Average Per Year salary
+
+# Step 3: Aggregate to get average salary per year
+salary_by_year <- Wr_Data %>%
+  group_by(Year.Signed) %>%
+  summarise(avg_salary = mean(APY, na.rm = TRUE))
+
+# Step 4: Fit a linear model
+lm_model <- lm(avg_salary ~ Year.Signed, data = salary_by_year)
+
+# Step 5: Plot with regression line
+ggplot(salary_by_year, aes(x = Year.Signed, y = avg_salary)) +
+  geom_point(color = "blue", size = 3) +
+  geom_smooth(method = "lm", se = FALSE, color = "red", linewidth = 1) +
+  labs(title = "Average QB Salary Over Time",
+       subtitle = "Linear model of APY by Year Signed",
+       x = "Year Signed",
+       y = "Average Salary (APY)") +
+  theme_minimal()
+```
+```{r}
+set.seed(1234)
+
+library(forecast)
+
+# Create response time series
+salary_ts <- ts(Wr_Data$APY, start = min(Wr_Data$Year))
+
+
+# Join Market_APY by year
+Wr_Data <- Wr_Data %>%
+  left_join(market_trend, by = "Year.Signed")
+
+
+```
+
+```{r}
+# Create xreg matrix (same row count as salary_ts)
+xreg_matrix <- cbind(
+  RF_Pred = base_predictions,
+  Market_APY = Wr_Data$Market_APY
+)
+
+
+# Fit the model
+ts_model <- auto.arima(salary_ts, xreg = xreg_matrix)
+summary(ts_model)
+
+```
+
+
+```{r}
+train_idx <- Wr_Data$Year.Signed <= 2018
+test_idx <- !train_idx
+
+# After you forecast for the test set
+future_forecast <- forecast(ts_model, xreg = xreg_matrix)
+predicted_salary_ts <- as.numeric(future_forecast$mean)
+
+# Make results table for test set
+res_ts <- data.frame(
+  Name = Wr_Data$Player,
+  Year = Wr_Data$Year,
+  Salary = Wr_Data$APY,
+  Predicted_Salary = predicted_salary_ts,
+  Diff = predicted_salary_ts - Wr_Data$APY,
+  PDiff = predicted_salary_ts / Wr_Data$APY
+)
+
+# View sorted by Predicted Salary
+res_ts %>% arrange(desc(Predicted_Salary))
+```
+
+```{r}
+fitted_vals <- fitted(ts_model)
+actual_vals <- Wr_Data$APY
+
+# Compute pseudo R²
+rss <- sum((actual_vals - fitted_vals)^2)
+tss <- sum((actual_vals - mean(actual_vals))^2)
+rsq <- 1 - rss/tss
+rsq
+```
